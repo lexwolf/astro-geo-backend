@@ -9,3 +9,13 @@ description = "Geocoding and astronomical backend utilities"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Proprietary" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+norecursedirs = ["*.egg-info", "dist", "build"]
+pythonpath = ["src"]
+
+markers = [
+  "integration: tests that hit real external services (run manually only)"
+]
+
