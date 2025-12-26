@@ -104,7 +104,7 @@ def test_real_nominatim_cache_prevents_second_network_call(monkeypatch):
     def boom(*args, **kwargs):
         raise RuntimeError("Network should not be called on cache hit.")
 
-    monkeypatch.setattr("geo.geocode_city._http_get_json", boom)
+    monkeypatch.setattr("geo.geocode_city.http_get_json", boom)
 
     res2, last_t2, err2 = geocode(
         "Cosenza, Italy",

@@ -32,7 +32,7 @@ def test_cache_hit_no_http(monkeypatch):
         nonlocal called
         called = True
 
-    monkeypatch.setattr("geo.geocode_city._http_get_json", fake_http)
+    monkeypatch.setattr("geo.geocode_city.http_get_json", fake_http)
 
     res, last_t, err = geocode(
         "Cosenza, Italy",
@@ -52,7 +52,7 @@ def test_successful_http_call(monkeypatch):
     def fake_http(url, user_agent, timeout=15.0):
         return FAKE_RESPONSE
 
-    monkeypatch.setattr("geo.geocode_city._http_get_json", fake_http)
+    monkeypatch.setattr("geo.geocode_city.http_get_json", fake_http)
 
     cache = {}
     res, last_t, err = geocode(
@@ -71,7 +71,7 @@ def test_successful_http_call(monkeypatch):
 
 
 def test_no_results(monkeypatch):
-    monkeypatch.setattr("geo.geocode_city._http_get_json", lambda *a, **k: [])
+    monkeypatch.setattr("geo.geocode_city.http_get_json", lambda *a, **k: [])
 
     res, last_t, err = geocode(
         "Nowhere City",
@@ -90,7 +90,7 @@ def test_network_error(monkeypatch):
     def boom(*args, **kwargs):
         raise RuntimeError("network down")
 
-    monkeypatch.setattr("geo.geocode_city._http_get_json", boom)
+    monkeypatch.setattr("geo.geocode_city.http_get_json", boom)
 
     res, last_t, err = geocode(
         "Cosenza, Italy",
