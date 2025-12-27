@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 
-from astro.zenith_constellation import constellation_at_zenith
+from astro.zenith_constellation import constellation_at_zenith, sun_constellation
 
 
 def main() -> int:
@@ -15,6 +15,9 @@ def main() -> int:
     args = ap.parse_args()
 
     print(constellation_at_zenith(args.utc, args.lat, args.lon, short=args.short))
+    r = sun_on_the_ecliptic(args.utc)
+    print(f"sun_ecl_lon_deg : {r.lon_deg:.6f}")
+    print(f"sun_const      : {sun_constellation(args.utc)}")
     return 0
 
 
