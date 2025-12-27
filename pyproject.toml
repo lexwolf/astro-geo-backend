@@ -5,10 +5,16 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "astro-geo-backend"
 version = "0.0.1"
-description = "Geocoding and astronomical backend utilities"
+description = "Geocoding, time resolution, and astronomical backend utilities"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Proprietary" }
+
+dependencies = [
+  "astropy>=6.0",
+  "timezonefinder>=6.0",
+  "requests>=2.28",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -18,4 +24,3 @@ pythonpath = ["src"]
 markers = [
   "integration: tests that hit real external services (run manually only)"
 ]
-
