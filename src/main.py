@@ -6,6 +6,7 @@ CLI that:
   - accepts: city, date, time
   - GEO: geocode city -> (display_name, lat, lon, tzname)
   - TIME: resolve (local date+time, tzname) -> UTC
+  - ASTRO: constellation at zenith (IAU) using UTC + lat/lon
   - prints a single JSON object
 
 Examples (from repo root):
@@ -38,17 +39,25 @@ if str(ROOT) not in sys.path:
 # -----------------------------
 # Project imports
 # -----------------------------
-from geo.geocode_city import (  # :contentReference[oaicite:0]{index=0}
+from geo.geocode_city import (
     DEFAULT_CACHE,
     geocode,
     load_cache,
     save_cache,
 )
-from civil_time.civil_time import (  # :contentReference[oaicite:1]{index=1}
+from civil_time.civil_time import (
     resolve_local_to_utc,
     AmbiguousLocalTime,
     NonExistentLocalTime,
 )
+
+# ASTRO: constellation at zenith
+try:
+    # If you place the module under src/astro/zenith_constellation.py
+    from astro.zenith_constellation import constellation_at_zenith
+except Exception:
+    # If you place the module directly under src/zenith_constellation.py
+    from zenith_constellation import constellation_at_zenith
 
 
 def _parse_date(s: str) -> date:
@@ -67,7 +76,7 @@ def _parse_time(s: str) -> dtime:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="GEO → TIME CLI; outputs one JSON object.")
+    p = argparse.ArgumentParser(description="GEO → TIME → ASTRO CLI; outputs one JSON object.")
     p.add_argument("-c", "--city", required=True, help='Place query, e.g. "Cosenza, Italy"')
     p.add_argument("-d", "--date", required=True, type=_parse_date, help="Local date YYYY-MM-DD")
     p.add_argument("-t", "--time", required=True, type=_parse_time, help="Local time HH:MM (or HH:MM:SS)")
@@ -88,6 +97,13 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["shift_forward", "shift_backward"],
         default="shift_forward",
         help="Policy if local time is non-existent (DST spring-forward gap). Used only after strict failure.",
+    )
+
+    # ASTRO options
+    p.add_argument(
+        "--short-constellation",
+        action="store_true",
+        help="Return 3-letter IAU constellation abbreviation instead of full name.",
     )
 
     return p
@@ -135,7 +151,6 @@ def main(argv: list[str] | None = None) -> int:
     tzid = geo_res.tzname
 
     try:
-        # strict attempt
         rr = resolve_local_to_utc(args.date, args.time, tzid, ambiguous="raise", nonexistent="raise")
     except AmbiguousLocalTime:
         warnings.append(f"Ambiguous local time in {tzid}; using policy ambiguous='{args.ambiguous}'.")
@@ -145,12 +160,29 @@ def main(argv: list[str] | None = None) -> int:
         rr = resolve_local_to_utc(args.date, args.time, tzid, ambiguous="raise", nonexistent=args.nonexistent)
 
     # -------------------------
+    # ASTRO (constellation at zenith)
+    # -------------------------
+    # Keep JSON formatting stable (minutes), but feed ASTRO a fully ISO '...:SSZ' string.
+    utc_iso_for_astro = rr.utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+    try:
+        constell = constellation_at_zenith(
+            utc_iso=utc_iso_for_astro,
+            lat_deg=float(geo_res.lat),
+            lon_deg=float(geo_res.lon),
+            short=bool(args.short_constellation),
+        )
+    except Exception as e:
+        # Don't crash the whole pipeline: record a warning and omit astro field.
+        warnings.append(f"ASTRO failed: {e!r}")
+        constell = None
+
+    # -------------------------
     # JSON output (single object)
     # -------------------------
     local_iso = f"{args.date.isoformat()}T{args.time.strftime('%H:%M')}"
     utc_iso = rr.utc.strftime("%Y-%m-%dT%H:%MZ")
 
-    payload = {
+    payload: dict[str, object] = {
         "place": {
             "display_name": geo_res.display_name,
             "lat": float(geo_res.lat),
@@ -163,6 +195,11 @@ def main(argv: list[str] | None = None) -> int:
             "warnings": warnings,
         },
     }
+
+    if constell is not None:
+        payload["astro"] = {
+            "zenith_constellation": constell,
+        }
 
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0
