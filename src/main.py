@@ -38,7 +38,7 @@ from civil_time.civil_time import resolve_local_to_utc, AmbiguousLocalTime, NonE
 
 # ASTRO modules live in src/astro/
 from astro.zenith_constellation import constellation_at_zenith
-from astro.sun_on_the_ecliptic import sun_on_the_ecliptic, sun_constellation
+from astro.sun_on_the_ecliptic import sun_on_the_ecliptic
 
 
 def _parse_date(s: str) -> date:
@@ -143,8 +143,9 @@ def main(argv: list[str] | None = None) -> int:
 
     # Sun info depends only on UTC
     sun_ecl = sun_on_the_ecliptic(utc_iso_for_astro)
+    sun_const = sun_ecl.constellation_short if args.short_constellation else sun_ecl.constellation
     astro_block["sun"] = {
-        "constellation": sun_constellation(utc_iso_for_astro, short=bool(args.short_constellation)),
+        "constellation": sun_const,
         "ecliptic": {"lon_deg": sun_ecl.lon_deg, "lat_deg": sun_ecl.lat_deg},
         "icrs": {"ra_deg": sun_ecl.ra_deg, "dec_deg": sun_ecl.dec_deg},
     }

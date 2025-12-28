@@ -1,12 +1,13 @@
 # astro-geo-backend
 
-Backend utilities for resolving **geographical location** and **civil time**
-information in a deterministic and reproducible way.
+Backend utilities for resolving **geographical location**, **civil time**, and
+basic **astronomical context** in a deterministic and reproducible way.
 
 This project provides a small, composable backend that performs:
 
 - **Geocoding**: city / place name → coordinates and IANA timezone
 - **Civil time resolution**: local date & time → UTC, with explicit DST handling
+- **Astro context**: zenith constellation + Sun constellation/ecliptic/ICRS at UTC
 
 The output is a single structured JSON object suitable for further
 astronomical or physical computations.
@@ -28,6 +29,13 @@ src/
 ├── civil_time/
 │   ├── civil_time.py          # Local → UTC conversion with DST policies
 │   ├── gimme_civil_time.py    # TIME CLI helper
+│   └── __init__.py
+│
+├── astro/
+│   ├── zenith_constellation.py  # IAU constellation at zenith
+│   ├── sun_on_the_ecliptic.py   # Sun ecliptic + ICRS + constellation
+│   ├── gimme_zenith_constellation.py
+│   ├── gimme_sun_on_the_ecliptic.py
 │   └── __init__.py
 │
 └── main.py                    # GEO → TIME orchestration CLI
@@ -59,9 +67,9 @@ Run the main CLI from the repository root:
 
 ```bash
 python3 src/main.py \
-  --city "Cosenza, Calabria, Italy" \
-  --date 1985-03-12 \
-  --time 08:30
+  --city "Tumbaco" \
+  --date 1977-12-23 \
+  --time 01:00
 ```
 
 ### Output
@@ -71,15 +79,29 @@ The program prints **one single JSON object** to stdout:
 ```json
 {
   "place": {
-    "display_name": "Cosenza, Calabria, Italia",
-    "lat": 39.5966853,
-    "lon": 16.3330556,
-    "tzid": "Europe/Rome"
+    "display_name": "Tumbaco, Quito, Pichincha, Ecuador",
+    "lat": -0.2122548,
+    "lon": -78.4044951,
+    "tzid": "America/Guayaquil"
   },
   "time": {
-    "local": "1985-03-12T08:30",
-    "utc": "1985-03-12T07:30Z",
+    "local": "1977-12-23T01:00",
+    "utc": "1977-12-23T06:00Z",
     "warnings": []
+  },
+  "astro": {
+    "zenith_constellation": "Monoceros",
+    "sun": {
+      "constellation": "Sagittarius",
+      "ecliptic": {
+        "lon_deg": 271.6017251883241,
+        "lat_deg": -0.002933940728190138
+      },
+      "icrs": {
+        "ra_deg": 309.5897357908915,
+        "dec_deg": -19.438574188148745
+      }
+    }
   }
 }
 ```
@@ -96,7 +118,8 @@ The program prints **one single JSON object** to stdout:
 - Geocoding uses **Nominatim** with caching and rate limiting.
 - Time conversion uses **IANA timezones** and explicit DST policies.
 - All components are deterministic and testable.
-- This repository intentionally stops at **GEO → TIME** resolution.
+- Astro computations are powered by **Astropy** and use official IAU
+  constellation boundaries.
 
-Astronomical logic (e.g. zenith, ephemerides, constellations) belongs in
-separate modules built on top of this backend.
+More advanced astronomical logic (e.g. detailed ephemerides, house systems,
+interpretations) belongs in separate modules built on top of this backend.
