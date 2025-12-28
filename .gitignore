@@ -18,3 +18,14 @@ venv/
 # OS
 .DS_Store
 
+# LaTeX build artifacts
+*.aux
+*.log
+*.out
+*.toc
+*.lof
+*.lot
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+# Keep .tex sources and compiled PDFs; ignore LaTeX intermediates

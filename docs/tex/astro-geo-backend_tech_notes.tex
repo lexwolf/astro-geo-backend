@@ -1,0 +1,257 @@
+% astro-geo-backend_tech_notes.tex
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[a4paper,margin=2.3cm]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{listings}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!60!black,
+  urlcolor=blue!60!black,
+  citecolor=blue!60!black
+}
+
+\lstdefinestyle{bash}{
+  basicstyle=\ttfamily\small,
+  columns=fullflexible,
+  frame=single,
+  breaklines=true
+}
+\lstdefinestyle{python}{
+  basicstyle=\ttfamily\small,
+  columns=fullflexible,
+  frame=single,
+  breaklines=true
+}
+
+\title{astro-geo-backend --- Technical Notes (Current Stage)}
+\author{Alessandro Veltri}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section{Scope and non-scope}
+This repository is a small backend whose job is to convert:
+\begin{enumerate}[label=\arabic*.]
+  \item a \textbf{place query} (e.g.\ a city name),
+  \item a \textbf{local civil date and time},
+\end{enumerate}
+into a single deterministic JSON payload containing:
+\begin{itemize}
+  \item WGS84 coordinates and an IANA timezone identifier,
+  \item the corresponding UTC instant (with explicit DST ambiguity handling),
+  \item minimal astronomical context: \textbf{IAU constellation at the zenith} and \textbf{Sun position/constellation}.
+\end{itemize}
+
+\textbf{Non-scope:} this project explicitly does \emph{not} implement any astrological interpretation, horoscope logic, house systems, or narrative mapping. It only produces clean, reproducible inputs for downstream modules.
+
+\section{High-level pipeline}
+The current backend is a three-stage pipeline:
+\[
+\texttt{GEO} \rightarrow \texttt{TIME} \rightarrow \texttt{ASTRO}
+\]
+or in words:
+\begin{enumerate}[label=\textbf{\alph*)}]
+  \item \textbf{GEO:} resolve a place query to $(\phi,\lambda)$ and a tzid,
+  \item \textbf{TIME:} resolve (local date, local time, tzid) to a \emph{unique} UTC instant,
+  \item \textbf{ASTRO:} compute zenith constellation and Sun context at that UTC instant.
+\end{enumerate}
+
+The orchestration is performed by a single CLI entry point, which prints \textbf{exactly one JSON object} to stdout.
+
+\section{Repository structure (current)}
+The relevant components are organized under \texttt{src/}:
+\begin{verbatim}
+src/
+|-- geo/         (place -> coords -> tzid)
+|-- civil_time/  (local -> UTC, DST-safe)
+|-- astro/       (zenith constellation, Sun position/constellation)
+`-- main.py      (GEO -> TIME -> ASTRO orchestration, JSON output)
+\end{verbatim}
+
+\section{Stage 1: GEO --- place query to coordinates (+ tzid)}
+\subsection{Data source and constraints}
+The geocoding stage uses OpenStreetMap Nominatim via HTTPS GET queries.
+Because Nominatim is a shared public service, the module implements:
+\begin{itemize}
+  \item \textbf{caching} of resolved queries to a JSON file in \texttt{\$HOME/.cache/},
+  \item \textbf{rate limiting} (minimum delay between remote requests),
+  \item a \textbf{user-agent string} (required by Nominatim usage policy).
+\end{itemize}
+
+\subsection{Optional timezone resolution}
+Timezone resolution from coordinates is performed only if the optional Python dependency
+\texttt{timezonefinder} is installed. If it is not available:
+\begin{itemize}
+  \item the GEO stage returns coordinates but \textbf{tzid is missing},
+  \item the main pipeline stops early with a clear error telling the user to install \texttt{timezonefinder}.
+\end{itemize}
+
+\subsection{Cache behavior}
+A cache hit skips the network entirely. Additionally, old cache entries can be \emph{upgraded}:
+if an entry has no timezone stored and \texttt{timezonefinder} is now available, tzid is computed and stored.
+
+\subsection{Inputs and outputs}
+\textbf{Input:} place query string.\\
+\textbf{Output:} best match (currently \texttt{limit=1}) with:
+\[
+\{\texttt{display\_name},\ \texttt{lat},\ \texttt{lon},\ \texttt{tzid}\}.
+\]
+
+\section{Stage 2: TIME --- local civil time to unique UTC instant}
+This stage solves a subtle problem: local civil times are not always one-to-one with UTC.
+
+\subsection{DST fall-back ambiguity (two valid instants)}
+During the autumn DST transition, a local wall-time can happen twice.
+The time module detects this by attempting both PEP~495 folds and verifying round-trips.
+
+Policy options:
+\begin{itemize}
+  \item \texttt{ambiguous='raise'}: error out (strict mode),
+  \item \texttt{ambiguous='earliest'}: choose the earlier UTC instant,
+  \item \texttt{ambiguous='latest'}: choose the later UTC instant.
+\end{itemize}
+
+\subsection{DST spring-forward gaps (non-existent local times)}
+During the spring DST transition, a local wall-time can be invalid.
+Policy options:
+\begin{itemize}
+  \item \texttt{nonexistent='raise'}: error out (strict mode),
+  \item \texttt{nonexistent='shift\_forward'}: move forward in small steps until valid,
+  \item \texttt{nonexistent='shift\_backward'}: move backward in small steps until valid.
+\end{itemize}
+
+\subsection{Why this matters}
+Astronomical computations must be fed an \textbf{unambiguous instant}.
+This module ensures the pipeline always reaches a unique UTC time, while also allowing the CLI to:
+\begin{itemize}
+  \item start strict (raise),
+  \item fall back to a chosen policy,
+  \item emit a \textbf{warning string} into the JSON payload when a policy is applied.
+\end{itemize}
+
+\section{Stage 3: ASTRO --- minimal astronomical context}
+All astronomical computations are performed with \texttt{astropy}.
+
+\subsection{Zenith constellation}
+Given:
+\[
+\texttt{utc\_iso},\ \phi=\texttt{lat\_deg},\ \lambda=\texttt{lon\_deg},
+\]
+the code constructs an \texttt{AltAz} frame at that Earth location and time, defines the zenith
+as $(\texttt{alt}=90^\circ,\ \texttt{az}=0^\circ)$ (azimuth is arbitrary at zenith but fixed for determinism),
+transforms to ICRS, and queries the official IAU constellation boundaries.
+
+Output can be either:
+\begin{itemize}
+  \item full constellation name, or
+  \item 3-letter IAU abbreviation (if \texttt{--short-constellation} is passed).
+\end{itemize}
+
+\subsection{Sun position and constellation}
+At the same UTC instant, the Sun is obtained via \texttt{astropy.coordinates.get\_sun}.
+The code then returns:
+\begin{itemize}
+  \item Sun constellation (IAU boundaries),
+  \item true ecliptic of date longitude/latitude,
+  \item ICRS right ascension and declination.
+\end{itemize}
+
+\section{The main CLI: single JSON payload}
+\subsection{Command-line interface}
+The primary entry point is:
+\begin{lstlisting}[style=bash]
+python3 src/main.py --city "Cosenza, Italy" --date 1982-08-25 --time 12:00
+\end{lstlisting}
+
+\subsection{What it prints}
+The program prints \textbf{one JSON object} with three top-level blocks:
+\begin{itemize}
+  \item \texttt{place}: \texttt{display\_name}, \texttt{lat}, \texttt{lon}, \texttt{tzid}
+  \item \texttt{time}: \texttt{local}, \texttt{utc}, \texttt{warnings}
+  \item \texttt{astro}: zenith constellation + Sun block
+\end{itemize}
+
+This contract (one JSON object to stdout) is intentional: it allows the CLI to be used in pipes,
+scripts, and future services.
+
+\section{Determinism and reproducibility}
+\subsection{What is deterministic}
+\begin{itemize}
+  \item Given \textbf{fixed} \texttt{(lat,lon,tzid,local time)}, the TIME stage is deterministic.
+  \item Given \textbf{fixed} \texttt{(lat,lon,utc)}, the ASTRO stage is deterministic.
+  \item Given \textbf{cached} geocoding entries, GEO is deterministic (no network).
+\end{itemize}
+
+\subsection{What is not fully deterministic}
+\begin{itemize}
+  \item The GEO stage depends on an external service (Nominatim) \emph{unless cached}.
+  \item Place-name ambiguity is resolved by ``best result'' with \texttt{limit=1}, which can change
+        if Nominatim ranking changes or the query is underspecified.
+\end{itemize}
+
+\section{Strengths and flaws (current stage)}
+\subsection{Strengths}
+\begin{itemize}
+  \item \textbf{Clean separation of concerns:} GEO, TIME, ASTRO are independent and testable.
+  \item \textbf{DST-safe time resolution:} ambiguity and gaps are detected explicitly, with policies.
+  \item \textbf{Single structured output:} one JSON object is easy to integrate downstream.
+  \item \textbf{Graceful optional dependency:} timezone resolution is modular (\texttt{timezonefinder}).
+  \item \textbf{IAU correctness:} constellation lookups use official IAU boundaries (via Astropy).
+\end{itemize}
+
+\subsection{Flaws / known limitations}
+\begin{itemize}
+  \item \textbf{Geocoding is external:} without cache, GEO depends on network + Nominatim availability.
+  \item \textbf{Timezone resolution is approximate:} \texttt{timezonefinder} uses polygons; edge cases near borders
+        or in complex administrative regions can fail or be wrong.
+  \item \textbf{Underspecified place queries:} ``Parma'' vs ``Parma, Ohio'' shows that tzid can be missing or
+        ambiguous depending on the match quality.
+  \item \textbf{Single-result geocoding:} \texttt{limit=1} hides alternatives; this is fine for a backend but not ideal
+        for interactive UX.
+  \item \textbf{No uncertainty metadata:} the JSON does not currently carry a confidence score beyond Nominatim
+        ``importance'' (and even that is not surfaced to the user by default).
+  \item \textbf{Astro scope is minimal:} zenith constellation and Sun context only; no Moon, planets, or
+        local sky visibility constraints.
+\end{itemize}
+
+\section{Practical next steps (suggested)}
+If the goal is to turn this into a robust backend for a larger app, the immediate improvements that
+have the highest payoff are:
+\begin{enumerate}[label=\arabic*.]
+  \item \textbf{Expose geocoding alternatives:} allow \texttt{--limit > 1} and return candidates
+        (or add an interactive/selection mode in a separate CLI).
+  \item \textbf{Persist last-request time in cache or state:} current orchestration resets \texttt{last\_t} per run,
+        so rate limiting is only meaningful inside a single process run.
+  \item \textbf{Add a validation/diagnostics mode:} e.g.\ include zenith RA/Dec, UTC offset, DST flag in JSON when
+        \texttt{--debug} is passed.
+  \item \textbf{Add unit tests:} especially for DST edge cases (Europe/Rome and at least one non-European zone).
+  \item \textbf{Define a stable JSON schema:} even a simple \texttt{schema.json} + version field prevents pain later.
+\end{enumerate}
+
+\section{Appendix: example JSON (conceptual)}
+\begin{lstlisting}[style=python]
+{
+  "place": { "display_name": "...", "lat": 0.0, "lon": 0.0, "tzid": "Europe/Rome" },
+  "time":  { "local": "YYYY-MM-DDTHH:MM", "utc": "YYYY-MM-DDTHH:MMZ", "warnings": [] },
+  "astro": {
+    "zenith_constellation": "Monoceros",
+    "sun": {
+      "constellation": "Sagittarius",
+      "ecliptic": { "lon_deg": 271.6, "lat_deg": -0.003 },
+      "icrs": { "ra_deg": 309.6, "dec_deg": -19.44 }
+    }
+  }
+}
+\end{lstlisting}
+
+\end{document}
