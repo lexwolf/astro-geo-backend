@@ -53,12 +53,6 @@ source .venv/bin/activate
 pip install -e .
 ```
 
-Optional (recommended) dependency for timezone resolution:
-
-```bash
-pip install timezonefinder
-```
-
 ---
 
 ## Usage
