@@ -107,6 +107,42 @@ The program prints **one single JSON object** to stdout:
 
 ---
 
+## HTTP API smoke checks
+
+The deployed endpoint always returns JSON, including validation and lookup
+errors. These checks should parse cleanly with `jq`:
+
+The ASGI application is exposed as `api:app` and serves
+`/astrogeo/v1/astrogeo`.
+
+```bash
+curl -sG 'https://lupoegatta.site/astrogeo/v1/astrogeo' \
+  --data-urlencode 'city=Cosnzza' \
+  --data-urlencode 'date=1982-08-25' \
+  --data-urlencode 'time=12:00' | jq .
+```
+
+```bash
+curl -sG 'https://lupoegatta.site/astrogeo/v1/astrogeo' \
+  --data-urlencode 'city=Cosenza' \
+  --data-urlencode 'date=1982-99-25' \
+  --data-urlencode 'time=12:00' | jq .
+```
+
+Expected error responses follow this shape:
+
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "INVALID_DATE",
+    "message": "Invalid date '1982-99-25'. Expected YYYY-MM-DD."
+  }
+}
+```
+
+---
+
 ## Design notes
 
 - Geocoding uses **Nominatim** with caching and rate limiting.
