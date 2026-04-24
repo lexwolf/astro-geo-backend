@@ -1,0 +1,25 @@
+[Unit]
+Description=AstroGeo thin HTTP wrapper (subprocess to backend CLI)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=astrogeo
+Group=astrogeo
+WorkingDirectory=/var/lib/astrogeo
+Environment=HOME=/var/lib/astrogeo
+ExecStart=/opt/astrogeo/venv/bin/python /opt/astrogeo/astrogeo_http.py --host 127.0.0.1 --port 8008 --venv-python /opt/astrogeo/venv/bin/python --main-py /opt/astrogeo/current/src/main.py
+Restart=on-failure
+RestartSec=2
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/astrogeo /var/log/astrogeo
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

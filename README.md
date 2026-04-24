@@ -143,6 +143,48 @@ Expected error responses follow this shape:
 
 ---
 
+## Deployment to lupoegatta
+
+The `lupoegatta` deployment is managed by scripts under `deploy/`.
+The local deployer uploads a release bundle to `/home/ncadmin/astrogeo-deploy`
+and then runs a sudo installer on the server.
+
+```bash
+deploy/deploy_lupoegatta.sh
+```
+
+The installer deploys releases under `/opt/astrogeo/releases/<timestamp>`,
+points `/opt/astrogeo/current` at the active release, installs the package into
+`/opt/astrogeo/venv`, updates `astrogeo-http.service`, restarts it, and checks
+`http://127.0.0.1:8008/healthz`.
+
+The service explicitly runs the backend CLI from:
+
+```text
+/opt/astrogeo/current/src/main.py
+```
+
+This removes the previous dependency on the old editable source path under
+`/srv/astro-geo-backend/astro-geo-backend`.
+
+Useful options:
+
+```bash
+deploy/deploy_lupoegatta.sh --skip-tests
+deploy/deploy_lupoegatta.sh --allow-dirty
+ASTROGEO_REMOTE=ncadmin@lupoegatta deploy/deploy_lupoegatta.sh
+```
+
+Manual rollback on the server:
+
+```bash
+sudo ln -sfn /opt/astrogeo/releases/<previous-release> /opt/astrogeo/current
+sudo install -o root -g root -m 0755 /opt/astrogeo/current/astrogeo_http.py /opt/astrogeo/astrogeo_http.py
+sudo systemctl restart astrogeo-http.service
+```
+
+---
+
 ## Design notes
 
 - Geocoding uses **Nominatim** with caching and rate limiting.
