@@ -1,6 +1,3 @@
-import time
-from pathlib import Path
-
 import pytest
 
 from geo.geocode_city import geocode, GeoResult
@@ -101,4 +98,5 @@ def test_network_error(monkeypatch):
     )
 
     assert res is None
+    assert err is not None
     assert "Network/API error" in err

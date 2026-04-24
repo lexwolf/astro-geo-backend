@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 import argparse
 
-from astro.zenith_constellation import constellation_at_zenith, sun_constellation
+from astro.zenith_constellation import constellation_at_zenith
+from astro.sun_on_the_ecliptic import sun_constellation, sun_on_the_ecliptic
 
 
 def main() -> int:

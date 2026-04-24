@@ -16,6 +16,12 @@ dependencies = [
   "requests>=2.28",
 ]
 
+[project.optional-dependencies]
+dev = [
+  "pytest>=8",
+  "flake8>=7",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 norecursedirs = ["*.egg-info", "dist", "build"]
