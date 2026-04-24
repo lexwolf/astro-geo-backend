@@ -170,7 +170,7 @@ if ! systemctl restart "${SERVICE_NAME}"; then
 fi
 
 for _ in 1 2 3 4 5; do
-  if curl -fsS http://127.0.0.1:8008/healthz >/dev/null; then
+  if curl -fsS http://127.0.0.1:8008/healthz >/dev/null 2>&1; then
     echo "AstroGeo deployed successfully: ${release_dir}"
     [[ -n "${service_backup}" ]] && rm -f "${service_backup}"
     [[ -n "${http_backup}" ]] && rm -f "${http_backup}"
