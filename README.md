@@ -112,8 +112,8 @@ The program prints **one single JSON object** to stdout:
 The deployed endpoint always returns JSON, including validation and lookup
 errors. These checks should parse cleanly with `jq`:
 
-The ASGI application is exposed as `api:app` and serves
-`/astrogeo/v1/astrogeo`.
+The deployed HTTP shim is `astrogeo_http.py` and serves `/v1/astrogeo`
+directly, or `/astrogeo/v1/astrogeo` when mounted behind that prefix.
 
 ```bash
 curl -sG 'https://lupoegatta.site/astrogeo/v1/astrogeo' \

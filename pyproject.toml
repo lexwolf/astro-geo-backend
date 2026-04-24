@@ -19,7 +19,10 @@ dependencies = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 norecursedirs = ["*.egg-info", "dist", "build"]
-pythonpath = ["src"]
+pythonpath = [
+  ".",
+  "src",
+]
 
 markers = [
   "integration: tests that hit real external services (run manually only)"

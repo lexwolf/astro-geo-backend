@@ -2,12 +2,18 @@
 from __future__ import annotations
 
 import argparse
+from datetime import date as date_type, time as time_type
 import json
 import os
+import re
 import subprocess
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
+
+ASTROGEO_PATHS = {"/v1/astrogeo", "/astrogeo/v1/astrogeo"}
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+TIME_RE = re.compile(r"^\d{2}:\d{2}(:\d{2})?$")
 
 
 def json_response(handler: BaseHTTPRequestHandler, status: int, payload: dict) -> None:
@@ -23,8 +29,72 @@ def json_response(handler: BaseHTTPRequestHandler, status: int, payload: dict) -
     handler.wfile.write(body)
 
 
-def error_payload(code: str, message: str, details: dict | None = None) -> dict:
-    return {"error": {"code": code, "message": message, "details": details or {}}}
+def error_payload(code: str, message: str) -> dict:
+    return {"ok": False, "error": {"code": code, "message": message}}
+
+
+def validate_city(city: str | None) -> str:
+    if not isinstance(city, str) or not city.strip():
+        raise ValueError("City must be a non-empty string.")
+    return " ".join(city.strip().split())
+
+
+def validate_date(date_s: str | None) -> str:
+    value = date_s.strip() if isinstance(date_s, str) else ""
+    if not DATE_RE.fullmatch(value):
+        raise ValueError(f"Invalid date '{value}'. Expected YYYY-MM-DD.")
+    try:
+        date_type.fromisoformat(value)
+    except ValueError as e:
+        raise ValueError(f"Invalid date '{value}'. Expected YYYY-MM-DD.") from e
+    return value
+
+
+def validate_time(time_s: str | None) -> str:
+    value = time_s.strip() if isinstance(time_s, str) else ""
+    if not TIME_RE.fullmatch(value):
+        raise ValueError(f"Invalid time '{value}'. Expected HH:MM or HH:MM:SS.")
+    try:
+        time_type.fromisoformat(value)
+    except ValueError as e:
+        raise ValueError(f"Invalid time '{value}'. Expected HH:MM or HH:MM:SS.") from e
+    return value
+
+
+def validate_request(city: str | None, date: str | None, time: str | None) -> tuple[int | None, dict | None, str, str, str]:
+    try:
+        city_v = validate_city(city)
+    except ValueError as e:
+        return 400, error_payload("INVALID_CITY", str(e)), "", "", ""
+
+    try:
+        date_v = validate_date(date)
+    except ValueError as e:
+        return 400, error_payload("INVALID_DATE", str(e)), "", "", ""
+
+    try:
+        time_v = validate_time(time)
+    except ValueError as e:
+        return 400, error_payload("INVALID_TIME", str(e)), "", "", ""
+
+    return None, None, city_v, date_v, time_v
+
+
+def geocoding_message(city: str, stderr: str) -> str:
+    suffix = "Try adding country/region."
+    if suffix in stderr:
+        return f"Could not resolve city '{city}'. {suffix}"
+    return f"Could not resolve city '{city}'."
+
+
+def classify_backend_error(exit_code: int, stderr: str, city: str) -> tuple[int, dict]:
+    if exit_code == 2:
+        return 404, error_payload("GEOCODING_FAILED", geocoding_message(city, stderr))
+    if exit_code == 3:
+        return 500, error_payload("TIMEZONE_FAILED", "Timezone could not be resolved from coordinates.")
+    if exit_code == 4:
+        return 500, error_payload("ASTRO_FAILED", "Astronomical context computation failed.")
+    return 500, error_payload("ASTRO_FAILED", "Astronomical context computation failed.")
 
 
 def run_backend(
@@ -55,35 +125,26 @@ def run_backend(
             timeout=timeout_s,
         )
     except subprocess.TimeoutExpired:
-        return 504, error_payload(
-            "TIMEOUT",
-            f"Backend timed out after {timeout_s:.1f}s",
-            {"timeout_s": timeout_s},
-        )
+        return 504, error_payload("TIMEOUT", f"Backend timed out after {timeout_s:.1f}s")
     except Exception as e:
-        return 500, error_payload("INTERNAL", "Failed to launch backend process", {"exc": repr(e)})
+        print(f"Failed to launch backend process: {e!r}", file=sys.stderr)
+        return 500, error_payload("INTERNAL_ERROR", "Unexpected server error.")
 
     if proc.returncode != 0:
         # Keep stderr for logs/debugging, but avoid dumping megabytes.
         stderr = (proc.stderr or "").strip()
         if len(stderr) > 4000:
             stderr = stderr[:4000] + " …(truncated)"
-        return 502, error_payload(
-            "BACKEND_ERROR",
-            "Backend returned non-zero exit code",
-            {"exit_code": proc.returncode, "stderr": stderr},
-        )
+        print(f"Backend exited {proc.returncode}: {stderr}", file=sys.stderr)
+        return classify_backend_error(proc.returncode, stderr, city)
 
     raw = (proc.stdout or "").strip()
     try:
         data = json.loads(raw)
     except Exception:
         snippet = raw[:1000] + (" …(truncated)" if len(raw) > 1000 else "")
-        return 502, error_payload(
-            "BAD_BACKEND_JSON",
-            "Backend did not return valid JSON",
-            {"stdout_snippet": snippet},
-        )
+        print(f"Backend did not return valid JSON: {snippet}", file=sys.stderr)
+        return 500, error_payload("ASTRO_FAILED", "Astronomical context computation failed.")
 
     return 200, data
 
@@ -99,25 +160,18 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/healthz":
             return json_response(self, 200, {"ok": True})
 
-        if parsed.path != "/v1/astrogeo":
+        if parsed.path not in ASTROGEO_PATHS:
             return json_response(self, 404, error_payload("NOT_FOUND", "Unknown endpoint"))
 
         qs = parse_qs(parsed.query)
-        city = (qs.get("city", [None])[0] or "").strip()
-        date = (qs.get("date", [None])[0] or "").strip()
-        time = (qs.get("time", [None])[0] or "").strip()
+        city = qs.get("city", [None])[0]
+        date = qs.get("date", [None])[0]
+        time = qs.get("time", [None])[0]
         short = (qs.get("short_constellation", ["false"])[0] or "false").lower() in ("1", "true", "yes")
 
-        if not city or not date or not time:
-            return json_response(
-                self,
-                400,
-                error_payload(
-                    "BAD_INPUT",
-                    "Missing required query parameters: city, date, time",
-                    {"got": {"city": bool(city), "date": bool(date), "time": bool(time)}},
-                ),
-            )
+        status, payload, city, date, time = validate_request(city, date, time)
+        if status is not None:
+            return json_response(self, status, payload)
 
         status, payload = run_backend(
             self.server.venv_python, self.server.main_py, city, date, time, short_constellation=short
@@ -126,7 +180,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urlparse(self.path)
-        if parsed.path != "/v1/astrogeo":
+        if parsed.path not in ASTROGEO_PATHS:
             return json_response(self, 404, error_payload("NOT_FOUND", "Unknown endpoint"))
 
         try:
@@ -140,21 +194,14 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             return json_response(self, 400, error_payload("BAD_INPUT", "POST body must be JSON"))
 
-        city = str(req.get("city", "")).strip()
-        date = str(req.get("date", "")).strip()
-        time = str(req.get("time", "")).strip()
+        city = req.get("city")
+        date = req.get("date")
+        time = req.get("time")
         short = bool(req.get("short_constellation", False))
 
-        if not city or not date or not time:
-            return json_response(
-                self,
-                400,
-                error_payload(
-                    "BAD_INPUT",
-                    "Missing required JSON fields: city, date, time",
-                    {"got": {"city": bool(city), "date": bool(date), "time": bool(time)}},
-                ),
-            )
+        status, payload, city, date, time = validate_request(city, date, time)
+        if status is not None:
+            return json_response(self, status, payload)
 
         status, payload = run_backend(
             self.server.venv_python, self.server.main_py, city, date, time, short_constellation=short
@@ -184,4 +231,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
