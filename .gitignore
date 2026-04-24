@@ -17,6 +17,7 @@ venv/
 
 # OS
 .DS_Store
+.directory
 
 # LaTeX build artifacts
 *.aux
