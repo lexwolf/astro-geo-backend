@@ -77,10 +77,8 @@ echo "Preparing remote staging directory ${REMOTE}:${REMOTE_STAGE_DIR}"
 ssh "${REMOTE}" "mkdir -p '${REMOTE_STAGE_DIR}'"
 
 echo "Uploading release bundle and installer"
-sftp -b - "${REMOTE}" <<SFTP
-put ${bundle} ${remote_bundle}
-put deploy/install_remote.sh ${remote_installer}
-SFTP
+scp "${bundle}" "${REMOTE}:${remote_bundle}"
+scp deploy/install_remote.sh "${REMOTE}:${remote_installer}"
 
 echo "Running remote installer via sudo"
 ssh -tt "${REMOTE}" "chmod +x '${remote_installer}' && sudo '${remote_installer}' '${remote_bundle}'"
