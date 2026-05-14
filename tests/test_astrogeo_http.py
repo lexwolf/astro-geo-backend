@@ -19,7 +19,35 @@ def test_validate_request_rejects_bad_date_without_backend_call():
     assert status == 400
     assert payload["ok"] is False
     assert payload["error"]["code"] == "INVALID_DATE"
-    assert payload["error"]["message"] == "Invalid date '1982-99-25'. Expected YYYY-MM-DD."
+    assert payload["error"]["message"] == "Invalid date '1982-99-25'. Expected YYYY-MM-DD with year 0001-9999."
+
+
+def test_validate_request_accepts_ancient_zero_padded_date():
+    status, payload, city, date, time = astrogeo_http.validate_request("Cosenza", "0100-08-25", "12:00")
+
+    assert status is None
+    assert payload is None
+    assert city == "Cosenza"
+    assert date == "0100-08-25"
+    assert time == "12:00"
+
+
+def test_validate_request_rejects_year_zero():
+    status, payload, *_ = astrogeo_http.validate_request("Cosenza", "0000-08-25", "12:00")
+
+    assert status == 400
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "INVALID_DATE"
+    assert payload["error"]["message"] == "Invalid date '0000-08-25'. Expected YYYY-MM-DD with year 0001-9999."
+
+
+def test_validate_request_rejects_non_four_digit_year():
+    status, payload, *_ = astrogeo_http.validate_request("Cosenza", "100-08-25", "12:00")
+
+    assert status == 400
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "INVALID_DATE"
+    assert payload["error"]["message"] == "Invalid date '100-08-25'. Expected YYYY-MM-DD with year 0001-9999."
 
 
 def test_validate_request_rejects_bad_time_without_backend_call():

@@ -14,6 +14,7 @@ from urllib.parse import parse_qs, urlparse
 ASTROGEO_PATHS = {"/v1/astrogeo", "/astrogeo/v1/astrogeo"}
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 TIME_RE = re.compile(r"^\d{2}:\d{2}(:\d{2})?$")
+DATE_EXPECTATION = "Expected YYYY-MM-DD with year 0001-9999."
 
 
 def json_response(handler: BaseHTTPRequestHandler, status: int, payload: dict) -> None:
@@ -42,11 +43,16 @@ def validate_city(city: str | None) -> str:
 def validate_date(date_s: str | None) -> str:
     value = date_s.strip() if isinstance(date_s, str) else ""
     if not DATE_RE.fullmatch(value):
-        raise ValueError(f"Invalid date '{value}'. Expected YYYY-MM-DD.")
+        raise ValueError(f"Invalid date '{value}'. {DATE_EXPECTATION}")
     try:
-        date_type.fromisoformat(value)
+        year = int(value[:4])
+        month = int(value[5:7])
+        day = int(value[8:10])
+        if year == 0:
+            raise ValueError("year 0 is out of range")
+        date_type(year, month, day)
     except ValueError as e:
-        raise ValueError(f"Invalid date '{value}'. Expected YYYY-MM-DD.") from e
+        raise ValueError(f"Invalid date '{value}'. {DATE_EXPECTATION}") from e
     return value
 
 

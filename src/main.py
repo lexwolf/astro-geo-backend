@@ -35,8 +35,6 @@ if str(ROOT) not in sys.path:
 from astrogeo_pipeline import (
     DEFAULT_CACHE,
     AstroGeoError,
-    argparse_date,
-    argparse_time,
     build_astrogeo_payload,
 )
 
@@ -44,8 +42,8 @@ from astrogeo_pipeline import (
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="GEO → TIME → ASTRO CLI; outputs one JSON object.")
     p.add_argument("-c", "--city", required=True, help='Place query, e.g. "Cosenza, Italy"')
-    p.add_argument("-d", "--date", required=True, type=argparse_date, help="Local date YYYY-MM-DD")
-    p.add_argument("-t", "--time", required=True, type=argparse_time, help="Local time HH:MM (or HH:MM:SS)")
+    p.add_argument("-d", "--date", required=True, help="Local date YYYY-MM-DD")
+    p.add_argument("-t", "--time", required=True, help="Local time HH:MM (or HH:MM:SS)")
 
     # GEO cache / rate limiting
     p.add_argument("--cache", type=Path, default=DEFAULT_CACHE, help="Cache file path")
@@ -69,8 +67,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         payload = build_astrogeo_payload(
             args.city,
-            args.date.isoformat(),
-            args.time.isoformat(),
+            args.date,
+            args.time,
             cache_path=args.cache,
             min_delay_s=args.min_delay,
             ambiguous=args.ambiguous,
@@ -78,6 +76,8 @@ def main(argv: list[str] | None = None) -> int:
             short_constellation=bool(args.short_constellation),
         )
     except AstroGeoError as e:
+        error_payload = {"ok": False, "error": {"code": e.code, "message": e.message}}
+        print(json.dumps(error_payload, ensure_ascii=False, indent=2))
         print(f"[ERR] {e.message}", file=sys.stderr)
         return {"GEOCODING_FAILED": 2, "TIMEZONE_FAILED": 3, "ASTRO_FAILED": 4}.get(e.code, 2)
 

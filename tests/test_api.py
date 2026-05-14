@@ -1,5 +1,7 @@
 import asyncio
 import json
+import subprocess
+import sys
 from types import SimpleNamespace
 from urllib.parse import urlencode
 
@@ -75,6 +77,36 @@ def test_valid_request_returns_json_with_place_time_astro(monkeypatch, fake_astr
     assert status == 200
     assert headers["content-type"].startswith("application/json")
     assert set(payload) == {"place", "time", "astro"}
+    assert payload["time"]["warnings"] == []
+
+
+@pytest.mark.parametrize("date_s", ["0100-08-25", "0050-08-25", "0001-08-25"])
+def test_ancient_zero_padded_dates_return_json_with_warning(monkeypatch, fake_astro, date_s):
+    def fake_geocode(*args, **kwargs):
+        return (
+            GeoResult(
+                query="Cosenza",
+                lat=39.298262,
+                lon=16.253735,
+                display_name="Cosenza, Calabria, Italia",
+                importance=0.45,
+                tzname="UTC",
+            ),
+            None,
+            None,
+        )
+
+    monkeypatch.setattr(astrogeo_pipeline, "geocode", fake_geocode)
+
+    status, headers, payload = _run_app(
+        params={"city": "Cosenza", "date": date_s, "time": "12:00"}
+    )
+
+    assert status == 200
+    assert headers["content-type"].startswith("application/json")
+    assert set(payload) == {"place", "time", "astro"}
+    assert payload["time"]["local"] == f"{date_s}T12:00"
+    assert any("proleptic Gregorian" in warning for warning in payload["time"]["warnings"])
 
 
 def test_bad_city_returns_geocoding_failed_json(monkeypatch):
@@ -105,7 +137,50 @@ def test_bad_date_returns_invalid_date_json(monkeypatch):
     assert headers["content-type"].startswith("application/json")
     assert payload["ok"] is False
     assert payload["error"]["code"] == "INVALID_DATE"
-    assert payload["error"]["message"] == "Invalid date '1982-99-25'. Expected YYYY-MM-DD."
+    assert payload["error"]["message"] == "Invalid date '1982-99-25'. Expected YYYY-MM-DD with year 0001-9999."
+
+
+@pytest.mark.parametrize("date_s", ["0000-08-25", "100-08-25", "50-08-25"])
+def test_bad_ancient_date_forms_return_invalid_date_json(monkeypatch, date_s):
+    monkeypatch.setattr(astrogeo_pipeline, "geocode", lambda *a, **k: pytest.fail("geocode called"))
+
+    status, headers, payload = _run_app(
+        params={"city": "Cosenza", "date": date_s, "time": "12:00"}
+    )
+
+    assert status == 400
+    assert headers["content-type"].startswith("application/json")
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "INVALID_DATE"
+    assert payload["error"]["message"] == f"Invalid date '{date_s}'. Expected YYYY-MM-DD with year 0001-9999."
+
+
+def test_cli_bad_date_returns_structured_json():
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "src/main.py",
+            "--city",
+            "Cosenza",
+            "--date",
+            "100-08-25",
+            "--time",
+            "12:00",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode != 0
+    payload = json.loads(proc.stdout)
+    assert payload == {
+        "ok": False,
+        "error": {
+            "code": "INVALID_DATE",
+            "message": "Invalid date '100-08-25'. Expected YYYY-MM-DD with year 0001-9999.",
+        },
+    }
 
 
 def test_bad_time_returns_invalid_time_json(monkeypatch):

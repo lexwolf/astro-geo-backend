@@ -4,6 +4,7 @@ import argparse
 from dataclasses import dataclass
 from datetime import date, time as dtime
 from pathlib import Path
+import re
 
 from astro.sun_on_the_ecliptic import sun_constellation, sun_on_the_ecliptic
 from astro.zenith_constellation import constellation_at_zenith
@@ -11,6 +12,12 @@ from civil_time.civil_time import AmbiguousLocalTime, NonExistentLocalTime, reso
 from geo.geocode_city import DEFAULT_CACHE, geocode, load_cache, save_cache
 
 USER_AGENT = "astro-geo-backend/0.1 (Alessandro Veltri; contact: alessandro.veltri@gmail.com)"
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+DATE_EXPECTATION = "Expected YYYY-MM-DD with year 0001-9999."
+HISTORICAL_DATE_WARNING = (
+    "Dates outside the modern high-confidence range use a proleptic Gregorian calendar "
+    "and approximate astronomical time models."
+)
 
 
 @dataclass(frozen=True)
@@ -24,12 +31,24 @@ class AstroGeoError(Exception):
 
 
 def parse_date(date_s: str) -> date:
+    if not DATE_RE.fullmatch(date_s):
+        raise AstroGeoError(
+            "INVALID_DATE",
+            f"Invalid date '{date_s}'. {DATE_EXPECTATION}",
+            400,
+        )
+
     try:
-        return date.fromisoformat(date_s)
+        year = int(date_s[:4])
+        month = int(date_s[5:7])
+        day = int(date_s[8:10])
+        if year == 0:
+            raise ValueError("year 0 is out of range")
+        return date(year, month, day)
     except ValueError as e:
         raise AstroGeoError(
             "INVALID_DATE",
-            f"Invalid date '{date_s}'. Expected YYYY-MM-DD.",
+            f"Invalid date '{date_s}'. {DATE_EXPECTATION}",
             400,
         ) from e
 
@@ -88,6 +107,8 @@ def build_astrogeo_payload(
     local_date = parse_date(date_s)
     local_time = parse_time(time_s)
     warnings: list[str] = []
+    if local_date.year < 1900 or local_date.year > 2100:
+        warnings.append(HISTORICAL_DATE_WARNING)
 
     cache = load_cache(cache_path)
     geo_res, _last_t, err = geocode(
@@ -121,7 +142,7 @@ def build_astrogeo_payload(
         warnings.append(f"Non-existent local time in {tzid}; using policy nonexistent='{nonexistent}'.")
         rr = resolve_local_to_utc(local_date, local_time, tzid, ambiguous="raise", nonexistent=nonexistent)
 
-    utc_iso_for_astro = rr.utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+    utc_iso_for_astro = f"{rr.utc.date().isoformat()}T{rr.utc.hour:02d}:{rr.utc.minute:02d}:{rr.utc.second:02d}Z"
 
     try:
         zenith_constellation = constellation_at_zenith(
@@ -140,7 +161,7 @@ def build_astrogeo_payload(
         ) from e
 
     local_iso = f"{local_date.isoformat()}T{local_time.strftime('%H:%M')}"
-    utc_iso = rr.utc.strftime("%Y-%m-%dT%H:%MZ")
+    utc_iso = f"{rr.utc.date().isoformat()}T{rr.utc.hour:02d}:{rr.utc.minute:02d}Z"
 
     return {
         "place": {

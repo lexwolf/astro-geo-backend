@@ -66,6 +66,15 @@ python3 src/main.py \
   --time 01:00
 ```
 
+Dates are accepted only in four-digit `YYYY-MM-DD` form, with years from
+`0001` through `9999`. This includes zero-padded historical years such as
+`0100-08-25`, `0050-08-25`, and `0001-08-25`; shorter forms such as
+`100-08-25` are invalid.
+
+Historical dates are treated mathematically using Python/Astropy's proleptic
+Gregorian calendar and astronomical approximations, not as historically local
+civil calendars.
+
 ### Output
 
 The program prints **one single JSON object** to stdout:
@@ -100,8 +109,9 @@ The program prints **one single JSON object** to stdout:
 }
 ```
 
-- `warnings` is populated only in case of DST ambiguities or non-existent
-  local times (spring/fall transitions).
+- `warnings` is populated in case of DST ambiguities, non-existent local times
+  (spring/fall transitions), or historical dates outside the modern
+  high-confidence range.
 - The JSON output is intended to be consumed by downstream astronomical
   or physical modules.
 
@@ -136,7 +146,7 @@ Expected error responses follow this shape:
   "ok": false,
   "error": {
     "code": "INVALID_DATE",
-    "message": "Invalid date '1982-99-25'. Expected YYYY-MM-DD."
+    "message": "Invalid date '1982-99-25'. Expected YYYY-MM-DD with year 0001-9999."
   }
 }
 ```
