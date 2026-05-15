@@ -1,0 +1,355 @@
+{
+  "scope": "Project-defined astrogeo error messages. Framework-generated argparse/HTTP server text is not included.",
+  "format_note": "Strict JSON does not allow comments, so each message entry starts with a comment field describing the error type.",
+  "errors": [
+    {
+      "comment": "Input validation error: missing or blank city/place query.",
+      "type": "validation",
+      "code": "INVALID_CITY",
+      "http_status": 400,
+      "message": "City must be a non-empty string.",
+      "sources": [
+        "src/astrogeo_pipeline.py",
+        "astrogeo_http.py"
+      ]
+    },
+    {
+      "comment": "Input validation error: invalid astrogeo API or main CLI date.",
+      "type": "validation",
+      "code": "INVALID_DATE",
+      "http_status": 400,
+      "message_template": "Invalid date '{date}'. Expected YYYY-MM-DD with year 0001-9999.",
+      "placeholders": {
+        "date": "Submitted date string, or an empty string when omitted."
+      },
+      "sources": [
+        "src/astrogeo_pipeline.py",
+        "astrogeo_http.py"
+      ]
+    },
+    {
+      "comment": "Input validation error: invalid astrogeo API or main CLI time.",
+      "type": "validation",
+      "code": "INVALID_TIME",
+      "http_status": 400,
+      "message_template": "Invalid time '{time}'. Expected HH:MM or HH:MM:SS.",
+      "placeholders": {
+        "time": "Submitted time string, or an empty string when omitted."
+      },
+      "sources": [
+        "src/astrogeo_pipeline.py",
+        "astrogeo_http.py"
+      ]
+    },
+    {
+      "comment": "Geocoding error: city could not be resolved and the geocoder suggested adding regional context.",
+      "type": "geocoding",
+      "code": "GEOCODING_FAILED",
+      "http_status": 404,
+      "message_template": "Could not resolve city '{city}'. Try adding country/region.",
+      "placeholders": {
+        "city": "Normalized submitted city/place query."
+      },
+      "sources": [
+        "src/astrogeo_pipeline.py",
+        "astrogeo_http.py",
+        "src/geo/geocode_city.py"
+      ]
+    },
+    {
+      "comment": "Geocoding error: city could not be resolved without an additional lower-level explanation.",
+      "type": "geocoding",
+      "code": "GEOCODING_FAILED",
+      "http_status": 404,
+      "message_template": "Could not resolve city '{city}'.",
+      "placeholders": {
+        "city": "Normalized submitted city/place query."
+      },
+      "sources": [
+        "src/astrogeo_pipeline.py",
+        "astrogeo_http.py"
+      ]
+    },
+    {
+      "comment": "Geocoding error: lower-level geocoder/network failure passed through by the pipeline.",
+      "type": "geocoding",
+      "code": "GEOCODING_FAILED",
+      "http_status": 404,
+      "message_template": "Network/API error for '{city}': {exception}",
+      "placeholders": {
+        "city": "Normalized submitted city/place query.",
+        "exception": "Exception text from the underlying network/API call."
+      },
+      "sources": [
+        "src/astrogeo_pipeline.py",
+        "src/geo/geocode_city.py"
+      ]
+    },
+    {
+      "comment": "Geocoding error: geocoder returned data in an unexpected shape.",
+      "type": "geocoding",
+      "code": "GEOCODING_FAILED",
+      "http_status": 404,
+      "message_template": "Unexpected API response shape for '{city}'.",
+      "placeholders": {
+        "city": "Normalized submitted city/place query."
+      },
+      "sources": [
+        "src/astrogeo_pipeline.py",
+        "src/geo/geocode_city.py"
+      ]
+    },
+    {
+      "comment": "Timezone lookup error: coordinates were found, but no IANA timezone could be resolved.",
+      "type": "timezone",
+      "code": "TIMEZONE_FAILED",
+      "http_status": 500,
+      "message": "Timezone could not be resolved from coordinates.",
+      "sources": [
+        "src/astrogeo_pipeline.py",
+        "astrogeo_http.py"
+      ]
+    },
+    {
+      "comment": "Astronomy computation error: constellation or solar context calculation failed.",
+      "type": "astronomy",
+      "code": "ASTRO_FAILED",
+      "http_status": 500,
+      "message": "Astronomical context computation failed.",
+      "sources": [
+        "src/astrogeo_pipeline.py",
+        "astrogeo_http.py"
+      ]
+    },
+    {
+      "comment": "Unexpected API/runtime error from the ASGI handler or standalone HTTP wrapper.",
+      "type": "internal",
+      "code": "INTERNAL_ERROR",
+      "http_status": 500,
+      "message": "Unexpected server error.",
+      "sources": [
+        "src/api.py",
+        "astrogeo_http.py"
+      ]
+    },
+    {
+      "comment": "Routing error from the ASGI app when the request path is not the astrogeo route.",
+      "type": "routing",
+      "code": "NOT_FOUND",
+      "http_status": 404,
+      "message": "Route not found.",
+      "sources": [
+        "src/api.py"
+      ]
+    },
+    {
+      "comment": "Routing error from the standalone HTTP wrapper when the request path is unknown.",
+      "type": "routing",
+      "code": "NOT_FOUND",
+      "http_status": 404,
+      "message": "Unknown endpoint",
+      "sources": [
+        "astrogeo_http.py"
+      ]
+    },
+    {
+      "comment": "HTTP method error from the ASGI app when a known route is called with a non-GET method.",
+      "type": "routing",
+      "code": "METHOD_NOT_ALLOWED",
+      "http_status": 405,
+      "message": "Method not allowed.",
+      "sources": [
+        "src/api.py"
+      ]
+    },
+    {
+      "comment": "Request parsing error from the standalone HTTP wrapper when POST body parsing fails.",
+      "type": "request_parsing",
+      "code": "BAD_INPUT",
+      "http_status": 400,
+      "message": "POST body must be JSON",
+      "sources": [
+        "astrogeo_http.py"
+      ]
+    },
+    {
+      "comment": "Backend process error from the standalone HTTP wrapper when the CLI exceeds the timeout.",
+      "type": "timeout",
+      "code": "TIMEOUT",
+      "http_status": 504,
+      "message_template": "Backend timed out after {timeout_seconds:.1f}s",
+      "placeholders": {
+        "timeout_seconds": "Configured backend subprocess timeout in seconds."
+      },
+      "sources": [
+        "astrogeo_http.py"
+      ]
+    },
+    {
+      "comment": "Internal runtime error raised when the ASGI app receives a non-HTTP scope.",
+      "type": "internal",
+      "code": null,
+      "http_status": null,
+      "message": "Unsupported ASGI scope type.",
+      "sources": [
+        "src/api.py"
+      ]
+    },
+    {
+      "comment": "Civil-time validation error: invalid ambiguous-time policy.",
+      "type": "civil_time_validation",
+      "code": null,
+      "http_status": null,
+      "message": "ambiguous must be one of: 'raise', 'earliest', 'latest'",
+      "sources": [
+        "src/civil_time/civil_time.py"
+      ]
+    },
+    {
+      "comment": "Civil-time validation error: invalid nonexistent-time policy.",
+      "type": "civil_time_validation",
+      "code": null,
+      "http_status": null,
+      "message": "nonexistent must be one of: 'raise', 'shift_forward', 'shift_backward'",
+      "sources": [
+        "src/civil_time/civil_time.py"
+      ]
+    },
+    {
+      "comment": "Civil-time validation error: non-positive search step for resolving DST gaps.",
+      "type": "civil_time_validation",
+      "code": null,
+      "http_status": null,
+      "message": "shift_resolution must be positive",
+      "sources": [
+        "src/civil_time/civil_time.py"
+      ]
+    },
+    {
+      "comment": "Civil-time validation error: non-positive search window for resolving DST gaps.",
+      "type": "civil_time_validation",
+      "code": null,
+      "http_status": null,
+      "message": "shift_search_limit must be positive",
+      "sources": [
+        "src/civil_time/civil_time.py"
+      ]
+    },
+    {
+      "comment": "Civil-time resolution error: local wall time maps to two UTC instants.",
+      "type": "civil_time_resolution",
+      "code": null,
+      "http_status": null,
+      "message_template": "Ambiguous local time {local_datetime} in {tzname}; use ambiguous='earliest' or 'latest'.",
+      "placeholders": {
+        "local_datetime": "Combined local date and time.",
+        "tzname": "IANA timezone name."
+      },
+      "sources": [
+        "src/civil_time/civil_time.py"
+      ]
+    },
+    {
+      "comment": "Civil-time resolution error: local wall time falls in a DST gap.",
+      "type": "civil_time_resolution",
+      "code": null,
+      "http_status": null,
+      "message_template": "Non-existent local time {local_datetime} in {tzname} (DST gap); use nonexistent='shift_forward' or 'shift_backward'.",
+      "placeholders": {
+        "local_datetime": "Combined local date and time.",
+        "tzname": "IANA timezone name."
+      },
+      "sources": [
+        "src/civil_time/civil_time.py"
+      ]
+    },
+    {
+      "comment": "Civil-time resolution error: configured DST-gap search could not find a valid local time.",
+      "type": "civil_time_resolution",
+      "code": null,
+      "http_status": null,
+      "message_template": "Could not resolve non-existent time {local_datetime} in {tzname} within {shift_search_limit} using step {shift_resolution}.",
+      "placeholders": {
+        "local_datetime": "Combined local date and time.",
+        "tzname": "IANA timezone name.",
+        "shift_search_limit": "Configured maximum absolute search window.",
+        "shift_resolution": "Configured search step."
+      },
+      "sources": [
+        "src/civil_time/civil_time.py"
+      ]
+    },
+    {
+      "comment": "Civil-time helper CLI validation error: invalid date argument.",
+      "type": "cli_validation",
+      "code": null,
+      "http_status": null,
+      "message_template": "Invalid date '{date}'. Use YYYY-MM-DD.",
+      "placeholders": {
+        "date": "Submitted date string."
+      },
+      "sources": [
+        "src/civil_time/gimme_civil_time.py"
+      ]
+    },
+    {
+      "comment": "Civil-time helper CLI validation error: invalid time argument.",
+      "type": "cli_validation",
+      "code": null,
+      "http_status": null,
+      "message_template": "Invalid time '{time}'. Use HH:MM or HH:MM:SS.",
+      "placeholders": {
+        "time": "Submitted time string."
+      },
+      "sources": [
+        "src/civil_time/gimme_civil_time.py"
+      ]
+    },
+    {
+      "comment": "Geocoder library error: empty query passed directly to the geocoder.",
+      "type": "geocoding",
+      "code": null,
+      "http_status": null,
+      "message": "Empty query.",
+      "sources": [
+        "src/geo/geocode_city.py"
+      ]
+    },
+    {
+      "comment": "Geocoder library error: no geocoder results for a direct geocoder query.",
+      "type": "geocoding",
+      "code": null,
+      "http_status": null,
+      "message_template": "No results for '{query}'. Try adding country/region.",
+      "placeholders": {
+        "query": "Normalized geocoder query."
+      },
+      "sources": [
+        "src/geo/geocode_city.py"
+      ]
+    },
+    {
+      "comment": "Geocoder helper CLI error: input file could not be read.",
+      "type": "cli_io",
+      "code": null,
+      "http_status": null,
+      "message_template": "Error reading file: {exception}",
+      "placeholders": {
+        "exception": "Exception text raised while reading the input file."
+      },
+      "sources": [
+        "src/geo/gimme_geocode_city.py"
+      ]
+    },
+    {
+      "comment": "Geocoder helper CLI usage error: neither a query nor an input file was provided.",
+      "type": "cli_validation",
+      "code": null,
+      "http_status": null,
+      "message": "Provide a query string or --file.",
+      "sources": [
+        "src/geo/gimme_geocode_city.py"
+      ]
+    }
+  ]
+}
