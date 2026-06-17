@@ -38,6 +38,13 @@ src/
 │   ├── gimme_sun_on_the_ecliptic.py
 │   └── __init__.py
 │
+├── reading/
+│   ├── prompt_builder.py        # Experimental entertainment prompt builder
+│   ├── ollama_client.py         # Optional local Ollama text generation
+│   ├── daily_reading.py         # Daily reading wrapper
+│   ├── gimme_daily_reading.py   # Daily reading smoke-test CLI
+│   └── __init__.py
+│
 └── main.py                    # GEO → TIME orchestration CLI
 ```
 
@@ -51,6 +58,38 @@ Create and activate a virtual environment:
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
+```
+
+### Optional experimental daily reading layer
+
+The `src/reading/` package is an optional entertainment / poetic text
+generation layer. It is not part of the deterministic GEO → TIME → ASTRO
+pipeline, does not change the meaning of the `astro` modules, and must not be
+treated as astronomy or scientific prediction.
+
+To try it locally, install Ollama separately and pull the small default model:
+
+```bash
+curl -fsSL https://ollama.com/install.sh | sh
+ollama pull llama3.2:3b
+ollama run llama3.2:3b
+```
+
+If Ollama is installed but not running, start it with:
+
+```bash
+ollama serve
+```
+
+Smoke test the experimental layer directly:
+
+```bash
+python3 src/reading/gimme_daily_reading.py \
+  --sign aries \
+  --city Messina \
+  --date 2026-06-17 \
+  --sun-constellation Gemini \
+  --zenith-constellation Aquila
 ```
 
 ---
@@ -217,3 +256,7 @@ sudo systemctl restart astrogeo-http.service
 
 More advanced astronomical logic (e.g. detailed ephemerides, house systems,
 interpretations) belongs in separate modules built on top of this backend.
+
+The optional `reading` layer is one such separate module: it can turn structured
+astro-geo context into concise playful prose, but only as entertainment text
+generation.
