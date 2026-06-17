@@ -82,6 +82,62 @@ def test_valid_request_returns_json_with_place_time_astro(monkeypatch, fake_astr
     assert payload["time"]["warnings"] == []
 
 
+def test_eu_date_request_returns_canonical_local_date(monkeypatch, fake_astro):
+    def fake_geocode(*args, **kwargs):
+        return (
+            GeoResult(
+                query="Cosenza",
+                lat=39.298262,
+                lon=16.253735,
+                display_name="Cosenza, Calabria, Italia",
+                importance=0.45,
+                tzname="Europe/Rome",
+            ),
+            None,
+            None,
+        )
+
+    monkeypatch.setattr(astrogeo_pipeline, "geocode", fake_geocode)
+
+    status, headers, payload = _run_app(
+        params={"city": "Cosenza", "eu_date": "25-08-1982", "time": "12:00"}
+    )
+
+    assert status == 200
+    assert headers["content-type"].startswith("application/json")
+    assert payload["time"]["local"] == "1982-08-25T12:00"
+    assert payload["time"]["local_date_display"] == "25-08-1982"
+    assert payload["time"]["warnings"] == []
+
+
+def test_historical_eu_date_request_returns_canonical_local_date(monkeypatch, fake_astro):
+    def fake_geocode(*args, **kwargs):
+        return (
+            GeoResult(
+                query="Cosenza",
+                lat=39.298262,
+                lon=16.253735,
+                display_name="Cosenza, Calabria, Italia",
+                importance=0.45,
+                tzname="UTC",
+            ),
+            None,
+            None,
+        )
+
+    monkeypatch.setattr(astrogeo_pipeline, "geocode", fake_geocode)
+
+    status, headers, payload = _run_app(
+        params={"city": "Cosenza", "eu_date": "21-01-0100", "time": "12:00"}
+    )
+
+    assert status == 200
+    assert headers["content-type"].startswith("application/json")
+    assert payload["time"]["local"] == "0100-01-21T12:00"
+    assert payload["time"]["local_date_display"] == "21-01-0100"
+    assert any("proleptic Gregorian" in warning for warning in payload["time"]["warnings"])
+
+
 @pytest.mark.parametrize("date_s", ["0100-08-25", "0050-08-25", "0001-08-25"])
 def test_ancient_zero_padded_dates_return_json_with_warning(monkeypatch, fake_astro, date_s):
     def fake_geocode(*args, **kwargs):
@@ -141,6 +197,46 @@ def test_bad_date_returns_invalid_date_json(monkeypatch):
     assert payload["ok"] is False
     assert payload["error"]["code"] == "INVALID_DATE"
     assert payload["error"]["message"] == "Invalid date '1982-99-25'. Expected YYYY-MM-DD with year 0001-9999."
+
+
+def test_date_and_eu_date_together_return_invalid_date_json(monkeypatch):
+    monkeypatch.setattr(astrogeo_pipeline, "geocode", lambda *a, **k: pytest.fail("geocode called"))
+
+    status, headers, payload = _run_app(
+        params={"city": "Cosenza", "date": "1982-08-25", "eu_date": "25-08-1982", "time": "12:00"}
+    )
+
+    assert status == 400
+    assert headers["content-type"].startswith("application/json")
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "INVALID_DATE"
+    assert payload["error"]["message"] == "Provide either date=YYYY-MM-DD or eu_date=DD-MM-YYYY, not both."
+
+
+def test_missing_date_and_eu_date_return_invalid_date_json(monkeypatch):
+    monkeypatch.setattr(astrogeo_pipeline, "geocode", lambda *a, **k: pytest.fail("geocode called"))
+
+    status, headers, payload = _run_app(params={"city": "Cosenza", "time": "12:00"})
+
+    assert status == 400
+    assert headers["content-type"].startswith("application/json")
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "INVALID_DATE"
+    assert payload["error"]["message"] == "Missing date. Provide either date=YYYY-MM-DD or eu_date=DD-MM-YYYY."
+
+
+def test_invalid_eu_date_returns_invalid_date_json(monkeypatch):
+    monkeypatch.setattr(astrogeo_pipeline, "geocode", lambda *a, **k: pytest.fail("geocode called"))
+
+    status, headers, payload = _run_app(
+        params={"city": "Cosenza", "eu_date": "31-02-1982", "time": "12:00"}
+    )
+
+    assert status == 400
+    assert headers["content-type"].startswith("application/json")
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "INVALID_DATE"
+    assert payload["error"]["message"] == "Invalid eu_date '31-02-1982'. Expected DD-MM-YYYY with year 0001-9999."
 
 
 @pytest.mark.parametrize("date_s", ["0000-08-25", "100-08-25", "50-08-25"])

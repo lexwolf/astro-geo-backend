@@ -13,7 +13,9 @@ from geo.geocode_city import DEFAULT_CACHE, geocode, load_cache, save_cache
 
 USER_AGENT = "astro-geo-backend/0.1 (Alessandro Veltri; contact: alessandro.veltri@gmail.com)"
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+EU_DATE_RE = re.compile(r"^\d{2}-\d{2}-\d{4}$")
 DATE_EXPECTATION = "Expected YYYY-MM-DD with year 0001-9999."
+EU_DATE_EXPECTATION = "Expected DD-MM-YYYY with year 0001-9999."
 HISTORICAL_DATE_WARNING = (
     "Dates outside the modern high-confidence range use a proleptic Gregorian calendar "
     "and approximate astronomical time models."
@@ -51,6 +53,50 @@ def parse_date(date_s: str) -> date:
             f"Invalid date '{date_s}'. {DATE_EXPECTATION}",
             400,
         ) from e
+
+
+def parse_eu_date(eu_date_s: str) -> date:
+    if not EU_DATE_RE.fullmatch(eu_date_s):
+        raise AstroGeoError(
+            "INVALID_DATE",
+            f"Invalid eu_date '{eu_date_s}'. {EU_DATE_EXPECTATION}",
+            400,
+        )
+
+    try:
+        day = int(eu_date_s[:2])
+        month = int(eu_date_s[3:5])
+        year = int(eu_date_s[6:10])
+        if year == 0:
+            raise ValueError("year 0 is out of range")
+        return date(year, month, day)
+    except ValueError as e:
+        raise AstroGeoError(
+            "INVALID_DATE",
+            f"Invalid eu_date '{eu_date_s}'. {EU_DATE_EXPECTATION}",
+            400,
+        ) from e
+
+
+def parse_date_input(date_s: str | None, eu_date_s: str | None = None) -> date:
+    date_value = date_s.strip() if isinstance(date_s, str) else ""
+    eu_date_value = eu_date_s.strip() if isinstance(eu_date_s, str) else ""
+
+    if date_value and eu_date_value:
+        raise AstroGeoError(
+            "INVALID_DATE",
+            "Provide either date=YYYY-MM-DD or eu_date=DD-MM-YYYY, not both.",
+            400,
+        )
+    if not date_value and not eu_date_value:
+        raise AstroGeoError(
+            "INVALID_DATE",
+            "Missing date. Provide either date=YYYY-MM-DD or eu_date=DD-MM-YYYY.",
+            400,
+        )
+    if eu_date_value:
+        return parse_eu_date(eu_date_value)
+    return parse_date(date_value)
 
 
 def parse_time(time_s: str) -> dtime:
@@ -93,9 +139,10 @@ def _geocoding_message(city: str, err: str | None) -> str:
 
 def build_astrogeo_payload(
     city: str,
-    date_s: str,
+    date_s: str | None,
     time_s: str,
     *,
+    eu_date_s: str | None = None,
     cache_path: Path = DEFAULT_CACHE,
     min_delay_s: float = 1.0,
     ambiguous: str = "earliest",
@@ -104,7 +151,7 @@ def build_astrogeo_payload(
     user_agent: str = USER_AGENT,
 ) -> dict[str, object]:
     city_norm = _validate_city(city)
-    local_date = parse_date(date_s)
+    local_date = parse_date_input(date_s, eu_date_s)
     local_time = parse_time(time_s)
     warnings: list[str] = []
     if local_date.year < 1900 or local_date.year > 2100:

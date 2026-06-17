@@ -32,6 +32,61 @@ def test_validate_request_accepts_ancient_zero_padded_date():
     assert time == "12:00"
 
 
+def test_validate_request_accepts_eu_date_as_canonical_iso_date():
+    status, payload, city, date, time = astrogeo_http.validate_request(
+        "Cosenza", None, "12:00", eu_date="25-08-1982"
+    )
+
+    assert status is None
+    assert payload is None
+    assert city == "Cosenza"
+    assert date == "1982-08-25"
+    assert time == "12:00"
+
+
+def test_validate_request_accepts_historical_eu_date_as_canonical_iso_date():
+    status, payload, city, date, time = astrogeo_http.validate_request(
+        "Cosenza", None, "12:00", eu_date="21-01-0100"
+    )
+
+    assert status is None
+    assert payload is None
+    assert city == "Cosenza"
+    assert date == "0100-01-21"
+    assert time == "12:00"
+
+
+def test_validate_request_rejects_date_and_eu_date_together():
+    status, payload, *_ = astrogeo_http.validate_request(
+        "Cosenza", "1982-08-25", "12:00", eu_date="25-08-1982"
+    )
+
+    assert status == 400
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "INVALID_DATE"
+    assert payload["error"]["message"] == "Provide either date=YYYY-MM-DD or eu_date=DD-MM-YYYY, not both."
+
+
+def test_validate_request_rejects_missing_date_and_eu_date():
+    status, payload, *_ = astrogeo_http.validate_request("Cosenza", None, "12:00")
+
+    assert status == 400
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "INVALID_DATE"
+    assert payload["error"]["message"] == "Missing date. Provide either date=YYYY-MM-DD or eu_date=DD-MM-YYYY."
+
+
+def test_validate_request_rejects_invalid_eu_date():
+    status, payload, *_ = astrogeo_http.validate_request(
+        "Cosenza", None, "12:00", eu_date="31-02-1982"
+    )
+
+    assert status == 400
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "INVALID_DATE"
+    assert payload["error"]["message"] == "Invalid eu_date '31-02-1982'. Expected DD-MM-YYYY with year 0001-9999."
+
+
 def test_validate_request_rejects_year_zero():
     status, payload, *_ = astrogeo_http.validate_request("Cosenza", "0000-08-25", "12:00")
 

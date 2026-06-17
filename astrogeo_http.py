@@ -13,8 +13,10 @@ from urllib.parse import parse_qs, urlparse
 
 ASTROGEO_PATHS = {"/v1/astrogeo", "/astrogeo/v1/astrogeo"}
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+EU_DATE_RE = re.compile(r"^\d{2}-\d{2}-\d{4}$")
 TIME_RE = re.compile(r"^\d{2}:\d{2}(:\d{2})?$")
 DATE_EXPECTATION = "Expected YYYY-MM-DD with year 0001-9999."
+EU_DATE_EXPECTATION = "Expected DD-MM-YYYY with year 0001-9999."
 
 
 def json_response(handler: BaseHTTPRequestHandler, status: int, payload: dict) -> None:
@@ -56,6 +58,35 @@ def validate_date(date_s: str | None) -> str:
     return value
 
 
+def validate_eu_date(eu_date_s: str | None) -> str:
+    value = eu_date_s.strip() if isinstance(eu_date_s, str) else ""
+    if not EU_DATE_RE.fullmatch(value):
+        raise ValueError(f"Invalid eu_date '{value}'. {EU_DATE_EXPECTATION}")
+    try:
+        day = int(value[:2])
+        month = int(value[3:5])
+        year = int(value[6:10])
+        if year == 0:
+            raise ValueError("year 0 is out of range")
+        date_type(year, month, day)
+    except ValueError as e:
+        raise ValueError(f"Invalid eu_date '{value}'. {EU_DATE_EXPECTATION}") from e
+    return f"{year:04d}-{month:02d}-{day:02d}"
+
+
+def validate_date_input(date: str | None, eu_date: str | None) -> str:
+    date_value = date.strip() if isinstance(date, str) else ""
+    eu_date_value = eu_date.strip() if isinstance(eu_date, str) else ""
+
+    if date_value and eu_date_value:
+        raise ValueError("Provide either date=YYYY-MM-DD or eu_date=DD-MM-YYYY, not both.")
+    if not date_value and not eu_date_value:
+        raise ValueError("Missing date. Provide either date=YYYY-MM-DD or eu_date=DD-MM-YYYY.")
+    if eu_date_value:
+        return validate_eu_date(eu_date_value)
+    return validate_date(date_value)
+
+
 def validate_time(time_s: str | None) -> str:
     value = time_s.strip() if isinstance(time_s, str) else ""
     if not TIME_RE.fullmatch(value):
@@ -67,14 +98,16 @@ def validate_time(time_s: str | None) -> str:
     return value
 
 
-def validate_request(city: str | None, date: str | None, time: str | None) -> tuple[int | None, dict | None, str, str, str]:
+def validate_request(
+    city: str | None, date: str | None, time: str | None, eu_date: str | None = None
+) -> tuple[int | None, dict | None, str, str, str]:
     try:
         city_v = validate_city(city)
     except ValueError as e:
         return 400, error_payload("INVALID_CITY", str(e)), "", "", ""
 
     try:
-        date_v = validate_date(date)
+        date_v = validate_date_input(date, eu_date)
     except ValueError as e:
         return 400, error_payload("INVALID_DATE", str(e)), "", "", ""
 
@@ -172,10 +205,11 @@ class Handler(BaseHTTPRequestHandler):
         qs = parse_qs(parsed.query)
         city = qs.get("city", [None])[0]
         date = qs.get("date", [None])[0]
+        eu_date = qs.get("eu_date", [None])[0]
         time = qs.get("time", [None])[0]
         short = (qs.get("short_constellation", ["false"])[0] or "false").lower() in ("1", "true", "yes")
 
-        status, payload, city, date, time = validate_request(city, date, time)
+        status, payload, city, date, time = validate_request(city, date, time, eu_date=eu_date)
         if status is not None:
             return json_response(self, status, payload)
 
@@ -202,10 +236,11 @@ class Handler(BaseHTTPRequestHandler):
 
         city = req.get("city")
         date = req.get("date")
+        eu_date = req.get("eu_date")
         time = req.get("time")
         short = bool(req.get("short_constellation", False))
 
-        status, payload, city, date, time = validate_request(city, date, time)
+        status, payload, city, date, time = validate_request(city, date, time, eu_date=eu_date)
         if status is not None:
             return json_response(self, status, payload)
 

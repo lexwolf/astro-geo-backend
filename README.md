@@ -66,7 +66,7 @@ python3 src/main.py \
   --time 01:00
 ```
 
-Dates are accepted only in four-digit `YYYY-MM-DD` form, with years from
+CLI dates are accepted only in four-digit `YYYY-MM-DD` form, with years from
 `0001` through `9999`. This includes zero-padded historical years such as
 `0100-08-25`, `0050-08-25`, and `0001-08-25`; shorter forms such as
 `100-08-25` are invalid.
@@ -126,10 +126,21 @@ errors. These checks should parse cleanly with `jq`:
 The deployed HTTP shim is `astrogeo_http.py` and serves `/v1/astrogeo`
 directly, or `/astrogeo/v1/astrogeo` when mounted behind that prefix.
 
+The HTTP API accepts either `date=YYYY-MM-DD` or `eu_date=DD-MM-YYYY`. Provide
+only one date parameter per request; European dates are canonicalized internally
+to the same date used by the ISO parser.
+
 ```bash
 curl -sG 'https://lupoegatta.site/astrogeo/v1/astrogeo' \
   --data-urlencode 'city=Cosnzza' \
   --data-urlencode 'date=1982-08-25' \
+  --data-urlencode 'time=12:00' | jq .
+```
+
+```bash
+curl -sG 'https://lupoegatta.site/astrogeo/v1/astrogeo' \
+  --data-urlencode 'city=Cosenza' \
+  --data-urlencode 'eu_date=25-08-1982' \
   --data-urlencode 'time=12:00' | jq .
 ```
 

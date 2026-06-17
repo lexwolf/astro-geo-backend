@@ -46,6 +46,7 @@ def handle_astrogeo_request(query_string: bytes) -> dict[str, Any]:
             first("city"),
             first("date"),
             first("time"),
+            eu_date_s=first("eu_date"),
         )
     except AstroGeoError as e:
         return error_response(e.code, e.message, e.status_code)
