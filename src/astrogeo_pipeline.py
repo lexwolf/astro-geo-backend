@@ -161,6 +161,7 @@ def build_astrogeo_payload(
         ) from e
 
     local_iso = f"{local_date.isoformat()}T{local_time.strftime('%H:%M')}"
+    local_date_display = f"{local_date.day:02d}-{local_date.month:02d}-{local_date.year:04d}"
     utc_iso = f"{rr.utc.date().isoformat()}T{rr.utc.hour:02d}:{rr.utc.minute:02d}Z"
 
     return {
@@ -170,7 +171,12 @@ def build_astrogeo_payload(
             "lon": float(geo_res.lon),
             "tzid": tzid,
         },
-        "time": {"local": local_iso, "utc": utc_iso, "warnings": warnings},
+        "time": {
+            "local": local_iso,
+            "local_date_display": local_date_display,
+            "utc": utc_iso,
+            "warnings": warnings,
+        },
         "astro": {
             "zenith_constellation": zenith_constellation,
             "sun": {

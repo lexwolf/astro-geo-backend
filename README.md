@@ -89,6 +89,7 @@ The program prints **one single JSON object** to stdout:
   },
   "time": {
     "local": "1977-12-23T01:00",
+    "local_date_display": "23-12-1977",
     "utc": "1977-12-23T06:00Z",
     "warnings": []
   },

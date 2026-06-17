@@ -77,6 +77,8 @@ def test_valid_request_returns_json_with_place_time_astro(monkeypatch, fake_astr
     assert status == 200
     assert headers["content-type"].startswith("application/json")
     assert set(payload) == {"place", "time", "astro"}
+    assert payload["time"]["local"] == "1982-08-25T12:00"
+    assert payload["time"]["local_date_display"] == "25-08-1982"
     assert payload["time"]["warnings"] == []
 
 
@@ -106,6 +108,7 @@ def test_ancient_zero_padded_dates_return_json_with_warning(monkeypatch, fake_as
     assert headers["content-type"].startswith("application/json")
     assert set(payload) == {"place", "time", "astro"}
     assert payload["time"]["local"] == f"{date_s}T12:00"
+    assert payload["time"]["local_date_display"] == f"{date_s[8:10]}-{date_s[5:7]}-{date_s[:4]}"
     assert any("proleptic Gregorian" in warning for warning in payload["time"]["warnings"])
 
 
