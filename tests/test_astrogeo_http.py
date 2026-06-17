@@ -114,6 +114,30 @@ def test_validate_request_rejects_bad_time_without_backend_call():
     assert payload["error"]["message"] == "Invalid time '25:99'. Expected HH:MM or HH:MM:SS."
 
 
+def test_validate_daily_reading_request_rejects_invalid_sign():
+    status, payload, *_ = astrogeo_http.validate_daily_reading_request(
+        "ophiuchus", "Messina", "2026-06-17", "12:00"
+    )
+
+    assert status == 400
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "INVALID_SIGN"
+    assert "Expected one of:" in payload["error"]["message"]
+
+
+def test_validate_daily_reading_request_accepts_sign_case_insensitively():
+    status, payload, sign, city, date, time = astrogeo_http.validate_daily_reading_request(
+        "Aries", "Messina", "2026-06-17", "12:00"
+    )
+
+    assert status is None
+    assert payload is None
+    assert sign == "aries"
+    assert city == "Messina"
+    assert date == "2026-06-17"
+    assert time == "12:00"
+
+
 def test_run_backend_preserves_success_json(monkeypatch):
     expected = {"place": {}, "time": {}, "astro": {}}
 
@@ -145,3 +169,81 @@ def test_run_backend_maps_geocoding_failure(monkeypatch):
     assert payload["ok"] is False
     assert payload["error"]["code"] == "GEOCODING_FAILED"
     assert payload["error"]["message"] == "Could not resolve city 'Cosnzza'. Try adding country/region."
+
+
+def test_build_daily_reading_payload_uses_local_ollama_only(monkeypatch):
+    backend_payload = {
+        "place": {"display_name": "Messina, Sicily, Italy"},
+        "time": {"local": "2026-06-17T12:00", "utc": "2026-06-17T10:00Z"},
+        "astro": {
+            "zenith_constellation": "Aquila",
+            "sun": {"constellation": "Gemini"},
+        },
+    }
+    captured = {}
+
+    def fake_generate_daily_reading(payload, model, ollama_url):
+        captured["payload"] = payload
+        captured["model"] = model
+        captured["ollama_url"] = ollama_url
+        return {
+            "kind": "daily_reading",
+            "model": model,
+            "disclaimer": "Entertainment text generated from astronomical context; not a scientific prediction.",
+            "text": "A playful line.",
+        }
+
+    monkeypatch.setattr(astrogeo_http, "generate_daily_reading", fake_generate_daily_reading)
+
+    status, payload = astrogeo_http.build_daily_reading_payload(
+        "aries", "Messina", "2026-06-17", backend_payload
+    )
+
+    assert status == 200
+    assert payload["place"] == backend_payload["place"]
+    assert payload["time"] == backend_payload["time"]
+    assert payload["astro"] == {
+        "sun_constellation": "Gemini",
+        "zenith_constellation": "Aquila",
+    }
+    assert payload["daily_reading"]["text"] == "A playful line."
+    assert captured["payload"] == {
+        "sign": "aries",
+        "local_date": "2026-06-17",
+        "city": "Messina, Sicily, Italy",
+        "sun_constellation": "Gemini",
+        "zenith_constellation": "Aquila",
+    }
+    assert captured["model"] == "llama3.2:3b"
+    assert captured["ollama_url"] == "http://127.0.0.1:11434/api/generate"
+
+
+def test_build_daily_reading_payload_maps_ollama_error_to_503(monkeypatch):
+    backend_payload = {
+        "place": {"display_name": "Messina, Sicily, Italy"},
+        "time": {"local": "2026-06-17T12:00"},
+        "astro": {
+            "zenith_constellation": "Aquila",
+            "sun": {"constellation": "Gemini"},
+        },
+    }
+
+    def fake_generate_daily_reading(payload, model, ollama_url):
+        return {
+            "kind": "daily_reading",
+            "model": model,
+            "disclaimer": "Entertainment text generated from astronomical context; not a scientific prediction.",
+            "text": "",
+            "error": "Ollama error: model not found",
+        }
+
+    monkeypatch.setattr(astrogeo_http, "generate_daily_reading", fake_generate_daily_reading)
+
+    status, payload = astrogeo_http.build_daily_reading_payload(
+        "aries", "Messina", "2026-06-17", backend_payload
+    )
+
+    assert status == 503
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "DAILY_READING_UNAVAILABLE"
+    assert payload["error"]["message"] == "Ollama error: model not found"

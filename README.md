@@ -92,6 +92,16 @@ python3 src/reading/gimme_daily_reading.py \
   --zenith-constellation Aquila
 ```
 
+When running the HTTP shim locally, the same experimental entertainment layer is
+available at `GET /daily-reading`. This endpoint first computes the normal
+deterministic astro-geo context, then uses that context only as poetic
+inspiration for generated text. It is not astronomy, not a scientific
+prediction, and not part of the deterministic `/v1/astrogeo` JSON contract.
+
+```bash
+curl "http://127.0.0.1:8008/daily-reading?sign=aries&city=Messina&date=2026-06-17&time=12:00"
+```
+
 ---
 
 ## Usage

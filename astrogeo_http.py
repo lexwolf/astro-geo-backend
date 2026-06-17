@@ -5,18 +5,42 @@ import argparse
 from datetime import date as date_type, time as time_type
 import json
 import os
+from pathlib import Path
 import re
 import subprocess
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
+SRC_ROOT = Path(__file__).resolve().parent / "src"
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
+
+from reading.daily_reading import generate_daily_reading  # noqa: E402
+from reading.ollama_client import DEFAULT_MODEL  # noqa: E402
+
 ASTROGEO_PATHS = {"/v1/astrogeo", "/astrogeo/v1/astrogeo"}
+DAILY_READING_PATH = "/daily-reading"
+DAILY_READING_OLLAMA_URL = "http://127.0.0.1:11434/api/generate"
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 EU_DATE_RE = re.compile(r"^\d{2}-\d{2}-\d{4}$")
 TIME_RE = re.compile(r"^\d{2}:\d{2}(:\d{2})?$")
 DATE_EXPECTATION = "Expected YYYY-MM-DD with year 0001-9999."
 EU_DATE_EXPECTATION = "Expected DD-MM-YYYY with year 0001-9999."
+ZODIAC_SIGNS = {
+    "aries",
+    "taurus",
+    "gemini",
+    "cancer",
+    "leo",
+    "virgo",
+    "libra",
+    "scorpio",
+    "sagittarius",
+    "capricorn",
+    "aquarius",
+    "pisces",
+}
 
 
 def json_response(handler: BaseHTTPRequestHandler, status: int, payload: dict) -> None:
@@ -98,6 +122,14 @@ def validate_time(time_s: str | None) -> str:
     return value
 
 
+def validate_sign(sign: str | None) -> str:
+    value = sign.strip().lower() if isinstance(sign, str) else ""
+    if value not in ZODIAC_SIGNS:
+        signs = ", ".join(sorted(ZODIAC_SIGNS))
+        raise ValueError(f"Invalid sign '{value}'. Expected one of: {signs}.")
+    return value
+
+
 def validate_request(
     city: str | None, date: str | None, time: str | None, eu_date: str | None = None
 ) -> tuple[int | None, dict | None, str, str, str]:
@@ -117,6 +149,21 @@ def validate_request(
         return 400, error_payload("INVALID_TIME", str(e)), "", "", ""
 
     return None, None, city_v, date_v, time_v
+
+
+def validate_daily_reading_request(
+    sign: str | None, city: str | None, date: str | None, time: str | None
+) -> tuple[int | None, dict | None, str, str, str, str]:
+    try:
+        sign_v = validate_sign(sign)
+    except ValueError as e:
+        return 400, error_payload("INVALID_SIGN", str(e)), "", "", "", ""
+
+    status, payload, city_v, date_v, time_v = validate_request(city, date, time)
+    if status is not None:
+        return status, payload, "", "", "", ""
+
+    return None, None, sign_v, city_v, date_v, time_v
 
 
 def geocoding_message(city: str, stderr: str) -> str:
@@ -188,6 +235,47 @@ def run_backend(
     return 200, data
 
 
+def build_daily_reading_payload(sign: str, city: str, date: str, backend_payload: dict) -> tuple[int, dict]:
+    try:
+        place = backend_payload["place"]
+        time_payload = backend_payload["time"]
+        astro_payload = backend_payload["astro"]
+        sun_constellation = astro_payload["sun"]["constellation"]
+        zenith_constellation = astro_payload["zenith_constellation"]
+    except (KeyError, TypeError):
+        return 500, error_payload("ASTRO_FAILED", "Astronomical context computation failed.")
+
+    display_city = place.get("display_name", city) if isinstance(place, dict) else city
+    local_date = date
+    if isinstance(time_payload, dict) and isinstance(time_payload.get("local"), str):
+        local_date = time_payload["local"].split("T", 1)[0]
+
+    reading_input = {
+        "sign": sign,
+        "local_date": local_date,
+        "city": display_city,
+        "sun_constellation": sun_constellation,
+        "zenith_constellation": zenith_constellation,
+    }
+    daily_reading = generate_daily_reading(
+        reading_input,
+        model=DEFAULT_MODEL,
+        ollama_url=DAILY_READING_OLLAMA_URL,
+    )
+    if daily_reading.get("error"):
+        return 503, error_payload("DAILY_READING_UNAVAILABLE", daily_reading["error"])
+
+    return 200, {
+        "place": place,
+        "time": time_payload,
+        "astro": {
+            "sun_constellation": sun_constellation,
+            "zenith_constellation": zenith_constellation,
+        },
+        "daily_reading": daily_reading,
+    }
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "astrogeo-http/0.1"
 
@@ -198,6 +286,24 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path == "/healthz":
             return json_response(self, 200, {"ok": True})
+
+        if parsed.path == DAILY_READING_PATH:
+            qs = parse_qs(parsed.query)
+            sign = qs.get("sign", [None])[0]
+            city = qs.get("city", [None])[0]
+            date = qs.get("date", [None])[0]
+            time = qs.get("time", [None])[0]
+
+            status, payload, sign, city, date, time = validate_daily_reading_request(sign, city, date, time)
+            if status is not None:
+                return json_response(self, status, payload)
+
+            status, backend_payload = run_backend(self.server.venv_python, self.server.main_py, city, date, time)
+            if status != 200:
+                return json_response(self, status, backend_payload)
+
+            status, payload = build_daily_reading_payload(sign, city, date, backend_payload)
+            return json_response(self, status, payload)
 
         if parsed.path not in ASTROGEO_PATHS:
             return json_response(self, 404, error_payload("NOT_FOUND", "Unknown endpoint"))
