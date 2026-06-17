@@ -20,7 +20,7 @@ from reading.daily_reading import generate_daily_reading  # noqa: E402
 from reading.ollama_client import DEFAULT_MODEL  # noqa: E402
 
 ASTROGEO_PATHS = {"/v1/astrogeo", "/astrogeo/v1/astrogeo"}
-DAILY_READING_PATH = "/daily-reading"
+DAILY_READING_PATHS = {"/daily-reading", "/astrogeo/daily-reading"}
 DAILY_READING_OLLAMA_URL = "http://127.0.0.1:11434/api/generate"
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 EU_DATE_RE = re.compile(r"^\d{2}-\d{2}-\d{4}$")
@@ -152,14 +152,18 @@ def validate_request(
 
 
 def validate_daily_reading_request(
-    sign: str | None, city: str | None, date: str | None, time: str | None
+    sign: str | None,
+    city: str | None,
+    date: str | None,
+    time: str | None,
+    eu_date: str | None = None,
 ) -> tuple[int | None, dict | None, str, str, str, str]:
     try:
         sign_v = validate_sign(sign)
     except ValueError as e:
         return 400, error_payload("INVALID_SIGN", str(e)), "", "", "", ""
 
-    status, payload, city_v, date_v, time_v = validate_request(city, date, time)
+    status, payload, city_v, date_v, time_v = validate_request(city, date, time, eu_date=eu_date)
     if status is not None:
         return status, payload, "", "", "", ""
 
@@ -287,14 +291,17 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/healthz":
             return json_response(self, 200, {"ok": True})
 
-        if parsed.path == DAILY_READING_PATH:
+        if parsed.path in DAILY_READING_PATHS:
             qs = parse_qs(parsed.query)
             sign = qs.get("sign", [None])[0]
             city = qs.get("city", [None])[0]
             date = qs.get("date", [None])[0]
+            eu_date = qs.get("eu_date", [None])[0]
             time = qs.get("time", [None])[0]
 
-            status, payload, sign, city, date, time = validate_daily_reading_request(sign, city, date, time)
+            status, payload, sign, city, date, time = validate_daily_reading_request(
+                sign, city, date, time, eu_date=eu_date
+            )
             if status is not None:
                 return json_response(self, status, payload)
 

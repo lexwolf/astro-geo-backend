@@ -1,5 +1,6 @@
 import json
 import subprocess
+from urllib.parse import urlparse
 
 import astrogeo_http
 
@@ -136,6 +137,36 @@ def test_validate_daily_reading_request_accepts_sign_case_insensitively():
     assert city == "Messina"
     assert date == "2026-06-17"
     assert time == "12:00"
+
+
+def test_validate_daily_reading_request_accepts_eu_date_as_canonical_iso_date():
+    status, payload, sign, city, date, time = astrogeo_http.validate_daily_reading_request(
+        "aries", "Messina", None, "12:00", eu_date="17-06-2026"
+    )
+
+    assert status is None
+    assert payload is None
+    assert sign == "aries"
+    assert city == "Messina"
+    assert date == "2026-06-17"
+    assert time == "12:00"
+
+
+def test_validate_daily_reading_request_rejects_date_and_eu_date_together():
+    status, payload, *_ = astrogeo_http.validate_daily_reading_request(
+        "aries", "Messina", "2026-06-17", "12:00", eu_date="17-06-2026"
+    )
+
+    assert status == 400
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "INVALID_DATE"
+    assert payload["error"]["message"] == "Provide either date=YYYY-MM-DD or eu_date=DD-MM-YYYY, not both."
+
+
+def test_daily_reading_prefixed_path_is_registered():
+    parsed = urlparse("/astrogeo/daily-reading?sign=aries&city=Messina&eu_date=17-06-2026&time=12:00")
+
+    assert parsed.path in astrogeo_http.DAILY_READING_PATHS
 
 
 def test_run_backend_preserves_success_json(monkeypatch):
