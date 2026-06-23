@@ -17,7 +17,7 @@ def generate_text(
     *,
     model: str = DEFAULT_MODEL,
     url: str = DEFAULT_OLLAMA_URL,
-    timeout_s: float = 60.0,
+    timeout_s: float = 180.0,
 ) -> str:
     body = json.dumps({"model": model, "prompt": prompt, "stream": False}).encode("utf-8")
     req = Request(
