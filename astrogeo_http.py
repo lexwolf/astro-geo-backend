@@ -20,7 +20,12 @@ from reading.daily_reading import generate_daily_reading  # noqa: E402
 from reading.ollama_client import DEFAULT_MODEL  # noqa: E402
 
 ASTROGEO_PATHS = {"/v1/astrogeo", "/astrogeo/v1/astrogeo"}
-DAILY_READING_PATHS = {"/daily-reading", "/astrogeo/daily-reading"}
+DAILY_READING_PATHS = {
+    "/daily-reading",
+    "/v1/daily-reading",
+    "/astrogeo/daily-reading",
+    "/astrogeo/v1/daily-reading",
+}
 DAILY_READING_OLLAMA_URL = "http://127.0.0.1:11434/api/generate"
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 EU_DATE_RE = re.compile(r"^\d{2}-\d{2}-\d{4}$")
@@ -280,6 +285,27 @@ def build_daily_reading_payload(sign: str, city: str, date: str, backend_payload
     }
 
 
+def build_daily_reading_response(
+    server,
+    sign: str | None,
+    city: str | None,
+    date: str | None,
+    time: str | None,
+    eu_date: str | None = None,
+) -> tuple[int, dict]:
+    status, payload, sign, city, date, time = validate_daily_reading_request(
+        sign, city, date, time, eu_date=eu_date
+    )
+    if status is not None:
+        return status, payload
+
+    status, backend_payload = run_backend(server.venv_python, server.main_py, city, date, time)
+    if status != 200:
+        return status, backend_payload
+
+    return build_daily_reading_payload(sign, city, date, backend_payload)
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "astrogeo-http/0.1"
 
@@ -299,17 +325,9 @@ class Handler(BaseHTTPRequestHandler):
             eu_date = qs.get("eu_date", [None])[0]
             time = qs.get("time", [None])[0]
 
-            status, payload, sign, city, date, time = validate_daily_reading_request(
-                sign, city, date, time, eu_date=eu_date
+            status, payload = build_daily_reading_response(
+                self.server, sign, city, date, time, eu_date=eu_date
             )
-            if status is not None:
-                return json_response(self, status, payload)
-
-            status, backend_payload = run_backend(self.server.venv_python, self.server.main_py, city, date, time)
-            if status != 200:
-                return json_response(self, status, backend_payload)
-
-            status, payload = build_daily_reading_payload(sign, city, date, backend_payload)
             return json_response(self, status, payload)
 
         if parsed.path not in ASTROGEO_PATHS:
@@ -332,10 +350,6 @@ class Handler(BaseHTTPRequestHandler):
         return json_response(self, status, payload)
 
     def do_POST(self):
-        parsed = urlparse(self.path)
-        if parsed.path not in ASTROGEO_PATHS:
-            return json_response(self, 404, error_payload("NOT_FOUND", "Unknown endpoint"))
-
         try:
             length = int(self.headers.get("Content-Length", "0"))
         except ValueError:
@@ -346,6 +360,24 @@ class Handler(BaseHTTPRequestHandler):
             req = json.loads(body.decode("utf-8") if body else "{}")
         except Exception:
             return json_response(self, 400, error_payload("BAD_INPUT", "POST body must be JSON"))
+
+        if not isinstance(req, dict):
+            return json_response(self, 400, error_payload("BAD_INPUT", "POST body must be a JSON object"))
+
+        parsed = urlparse(self.path)
+        if parsed.path in DAILY_READING_PATHS:
+            status, payload = build_daily_reading_response(
+                self.server,
+                req.get("sign"),
+                req.get("city"),
+                req.get("date"),
+                req.get("time"),
+                eu_date=req.get("eu_date"),
+            )
+            return json_response(self, status, payload)
+
+        if parsed.path not in ASTROGEO_PATHS:
+            return json_response(self, 404, error_payload("NOT_FOUND", "Unknown endpoint"))
 
         city = req.get("city")
         date = req.get("date")

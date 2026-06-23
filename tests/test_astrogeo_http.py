@@ -1,5 +1,7 @@
+import io
 import json
 import subprocess
+from types import SimpleNamespace
 from urllib.parse import urlparse
 
 import astrogeo_http
@@ -167,6 +169,93 @@ def test_daily_reading_prefixed_path_is_registered():
     parsed = urlparse("/astrogeo/daily-reading?sign=aries&city=Messina&eu_date=17-06-2026&time=12:00")
 
     assert parsed.path in astrogeo_http.DAILY_READING_PATHS
+
+
+def test_daily_reading_versioned_paths_are_registered():
+    assert "/v1/daily-reading" in astrogeo_http.DAILY_READING_PATHS
+    assert "/astrogeo/v1/daily-reading" in astrogeo_http.DAILY_READING_PATHS
+
+
+class FakePostHandler:
+    def __init__(self, path, body):
+        self.path = path
+        self.body = body
+        self.headers = {"Content-Length": str(len(body))}
+        self.rfile = io.BytesIO(body)
+        self.wfile = io.BytesIO()
+        self.server = SimpleNamespace(venv_python="python", main_py="main.py")
+        self.status = None
+        self.response_headers = {}
+
+    def send_response(self, status):
+        self.status = status
+
+    def send_header(self, name, value):
+        self.response_headers[name.lower()] = value
+
+    def end_headers(self):
+        pass
+
+
+def _post(path, payload):
+    handler = FakePostHandler(path, json.dumps(payload).encode("utf-8"))
+    astrogeo_http.Handler.do_POST(handler)
+    response = json.loads(handler.wfile.getvalue().decode("utf-8"))
+    return handler.status, handler.response_headers, response
+
+
+def test_daily_reading_post_json_accepts_eu_date(monkeypatch):
+    backend_payload = {
+        "place": {"display_name": "Messina, Sicily, Italy"},
+        "time": {"local": "2026-06-23T12:00"},
+        "astro": {
+            "zenith_constellation": "Aquila",
+            "sun": {"constellation": "Gemini"},
+        },
+    }
+    captured = {}
+
+    def fake_run_backend(venv_python, main_py, city, date, time, **kwargs):
+        captured.update({"city": city, "date": date, "time": time, "kwargs": kwargs})
+        return 200, backend_payload
+
+    def fake_generate_daily_reading(payload, model, ollama_url):
+        return {"kind": "daily_reading", "model": model, "text": "A playful line."}
+
+    monkeypatch.setattr(astrogeo_http, "run_backend", fake_run_backend)
+    monkeypatch.setattr(astrogeo_http, "generate_daily_reading", fake_generate_daily_reading)
+
+    status, headers, payload = _post(
+        "/astrogeo/daily-reading",
+        {"sign": "aries", "city": "Messina", "eu_date": "23-06-2026", "time": "12:00"},
+    )
+
+    assert status == 200
+    assert headers["content-type"].startswith("application/json")
+    assert captured == {
+        "city": "Messina",
+        "date": "2026-06-23",
+        "time": "12:00",
+        "kwargs": {},
+    }
+    assert payload["daily_reading"]["text"] == "A playful line."
+
+
+def test_daily_reading_post_json_rejects_invalid_sign_without_backend(monkeypatch):
+    def fail_run_backend(*args, **kwargs):
+        raise AssertionError("run_backend should not be called")
+
+    monkeypatch.setattr(astrogeo_http, "run_backend", fail_run_backend)
+
+    status, headers, payload = _post(
+        "/astrogeo/v1/daily-reading",
+        {"sign": "ophiuchus", "city": "Messina", "date": "2026-06-23", "time": "12:00"},
+    )
+
+    assert status == 400
+    assert headers["content-type"].startswith("application/json")
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "INVALID_SIGN"
 
 
 def test_run_backend_preserves_success_json(monkeypatch):
