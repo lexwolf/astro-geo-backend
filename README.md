@@ -100,6 +100,9 @@ prediction, and not part of the deterministic `/v1/astrogeo` JSON contract.
 
 ```bash
 curl "http://127.0.0.1:8008/daily-reading?sign=aries&city=Messina&date=2026-06-17&time=12:00"
+curl "http://127.0.0.1:8008/daily-reading?sign=aries&date=2026-06-17&time=12:00"
+curl "http://127.0.0.1:8008/daily-reading?sign=aries&city=Messina&date=2026-06-17&time=12:00&language=it"
+curl "http://127.0.0.1:8008/daily-reading?sign=aries&city=Messina&date=2026-06-17&time=12:00&language=es"
 ```
 
 ---

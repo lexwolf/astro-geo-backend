@@ -18,6 +18,7 @@ if str(SRC_ROOT) not in sys.path:
 
 from reading.daily_reading import generate_daily_reading  # noqa: E402
 from reading.ollama_client import DEFAULT_MODEL  # noqa: E402
+from astro.sun_on_the_ecliptic import sun_constellation  # noqa: E402
 
 ASTROGEO_PATHS = {"/v1/astrogeo", "/astrogeo/v1/astrogeo"}
 DAILY_READING_PATHS = {
@@ -46,6 +47,7 @@ ZODIAC_SIGNS = {
     "aquarius",
     "pisces",
 }
+DAILY_READING_LANGUAGES = {"en", "it", "es"}
 
 
 def json_response(handler: BaseHTTPRequestHandler, status: int, payload: dict) -> None:
@@ -68,6 +70,12 @@ def error_payload(code: str, message: str) -> dict:
 def validate_city(city: str | None) -> str:
     if not isinstance(city, str) or not city.strip():
         raise ValueError("City must be a non-empty string.")
+    return " ".join(city.strip().split())
+
+
+def normalize_optional_city(city: str | None) -> str:
+    if not isinstance(city, str) or not city.strip():
+        return ""
     return " ".join(city.strip().split())
 
 
@@ -135,6 +143,13 @@ def validate_sign(sign: str | None) -> str:
     return value
 
 
+def validate_daily_reading_language(language: str | None) -> str:
+    value = language.strip().lower() if isinstance(language, str) else ""
+    if value in DAILY_READING_LANGUAGES:
+        return value
+    return "en"
+
+
 def validate_request(
     city: str | None, date: str | None, time: str | None, eu_date: str | None = None
 ) -> tuple[int | None, dict | None, str, str, str]:
@@ -162,17 +177,27 @@ def validate_daily_reading_request(
     date: str | None,
     time: str | None,
     eu_date: str | None = None,
-) -> tuple[int | None, dict | None, str, str, str, str]:
+    language: str | None = None,
+) -> tuple[int | None, dict | None, str, str, str, str, bool, str]:
     try:
         sign_v = validate_sign(sign)
     except ValueError as e:
-        return 400, error_payload("INVALID_SIGN", str(e)), "", "", "", ""
+        return 400, error_payload("INVALID_SIGN", str(e)), "", "", "", "", False, "en"
 
-    status, payload, city_v, date_v, time_v = validate_request(city, date, time, eu_date=eu_date)
-    if status is not None:
-        return status, payload, "", "", "", ""
+    city_v = normalize_optional_city(city)
+    has_city = bool(city_v)
 
-    return None, None, sign_v, city_v, date_v, time_v
+    try:
+        date_v = validate_date_input(date, eu_date)
+    except ValueError as e:
+        return 400, error_payload("INVALID_DATE", str(e)), "", "", "", "", False, "en"
+
+    try:
+        time_v = validate_time(time)
+    except ValueError as e:
+        return 400, error_payload("INVALID_TIME", str(e)), "", "", "", "", False, "en"
+
+    return None, None, sign_v, city_v, date_v, time_v, has_city, validate_daily_reading_language(language)
 
 
 def geocoding_message(city: str, stderr: str) -> str:
@@ -244,17 +269,54 @@ def run_backend(
     return 200, data
 
 
-def build_daily_reading_payload(sign: str, city: str, date: str, backend_payload: dict) -> tuple[int, dict]:
+def normalize_utc_iso(date: str, time: str) -> str:
+    normalized_time = time if len(time) == 8 else f"{time}:00"
+    return f"{date}T{normalized_time}"
+
+
+def build_sun_only_backend_payload(date: str, time: str) -> tuple[int, dict]:
+    utc_iso = normalize_utc_iso(date, time)
+    try:
+        sun = sun_constellation(utc_iso)
+    except Exception:
+        return 500, error_payload("ASTRO_FAILED", "Astronomical context computation failed.")
+
+    return 200, {
+        "place": None,
+        "time": {
+            "local": utc_iso,
+            "utc": f"{utc_iso}Z",
+        },
+        "astro": {
+            "sun": {"constellation": sun},
+        },
+    }
+
+
+def build_daily_reading_payload(
+    sign: str,
+    city: str,
+    date: str,
+    backend_payload: dict,
+    has_city: bool = True,
+    language: str = "en",
+) -> tuple[int, dict]:
     try:
         place = backend_payload["place"]
         time_payload = backend_payload["time"]
         astro_payload = backend_payload["astro"]
         sun_constellation = astro_payload["sun"]["constellation"]
-        zenith_constellation = astro_payload["zenith_constellation"]
     except (KeyError, TypeError):
         return 500, error_payload("ASTRO_FAILED", "Astronomical context computation failed.")
 
-    display_city = place.get("display_name", city) if isinstance(place, dict) else city
+    zenith_constellation = None
+    if has_city:
+        try:
+            zenith_constellation = astro_payload["zenith_constellation"]
+        except (KeyError, TypeError):
+            return 500, error_payload("ASTRO_FAILED", "Astronomical context computation failed.")
+
+    display_city = place.get("display_name", city) if has_city and isinstance(place, dict) else ""
     local_date = date
     if isinstance(time_payload, dict) and isinstance(time_payload.get("local"), str):
         local_date = time_payload["local"].split("T", 1)[0]
@@ -263,6 +325,8 @@ def build_daily_reading_payload(sign: str, city: str, date: str, backend_payload
         "sign": sign,
         "local_date": local_date,
         "city": display_city,
+        "has_city": has_city,
+        "language": language,
         "sun_constellation": sun_constellation,
         "zenith_constellation": zenith_constellation,
     }
@@ -292,18 +356,22 @@ def build_daily_reading_response(
     date: str | None,
     time: str | None,
     eu_date: str | None = None,
+    language: str | None = None,
 ) -> tuple[int, dict]:
-    status, payload, sign, city, date, time = validate_daily_reading_request(
-        sign, city, date, time, eu_date=eu_date
+    status, payload, sign, city, date, time, has_city, language = validate_daily_reading_request(
+        sign, city, date, time, eu_date=eu_date, language=language
     )
     if status is not None:
         return status, payload
 
-    status, backend_payload = run_backend(server.venv_python, server.main_py, city, date, time)
+    if has_city:
+        status, backend_payload = run_backend(server.venv_python, server.main_py, city, date, time)
+    else:
+        status, backend_payload = build_sun_only_backend_payload(date, time)
     if status != 200:
         return status, backend_payload
 
-    return build_daily_reading_payload(sign, city, date, backend_payload)
+    return build_daily_reading_payload(sign, city, date, backend_payload, has_city=has_city, language=language)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -324,9 +392,10 @@ class Handler(BaseHTTPRequestHandler):
             date = qs.get("date", [None])[0]
             eu_date = qs.get("eu_date", [None])[0]
             time = qs.get("time", [None])[0]
+            language = qs.get("language", [None])[0]
 
             status, payload = build_daily_reading_response(
-                self.server, sign, city, date, time, eu_date=eu_date
+                self.server, sign, city, date, time, eu_date=eu_date, language=language
             )
             return json_response(self, status, payload)
 
@@ -373,6 +442,7 @@ class Handler(BaseHTTPRequestHandler):
                 req.get("date"),
                 req.get("time"),
                 eu_date=req.get("eu_date"),
+                language=req.get("language"),
             )
             return json_response(self, status, payload)
 

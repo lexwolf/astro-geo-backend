@@ -129,7 +129,7 @@ def test_validate_daily_reading_request_rejects_invalid_sign():
 
 
 def test_validate_daily_reading_request_accepts_sign_case_insensitively():
-    status, payload, sign, city, date, time = astrogeo_http.validate_daily_reading_request(
+    status, payload, sign, city, date, time, has_city, language = astrogeo_http.validate_daily_reading_request(
         "Aries", "Messina", "2026-06-17", "12:00"
     )
 
@@ -139,10 +139,12 @@ def test_validate_daily_reading_request_accepts_sign_case_insensitively():
     assert city == "Messina"
     assert date == "2026-06-17"
     assert time == "12:00"
+    assert has_city is True
+    assert language == "en"
 
 
 def test_validate_daily_reading_request_accepts_eu_date_as_canonical_iso_date():
-    status, payload, sign, city, date, time = astrogeo_http.validate_daily_reading_request(
+    status, payload, sign, city, date, time, has_city, language = astrogeo_http.validate_daily_reading_request(
         "aries", "Messina", None, "12:00", eu_date="17-06-2026"
     )
 
@@ -152,6 +154,46 @@ def test_validate_daily_reading_request_accepts_eu_date_as_canonical_iso_date():
     assert city == "Messina"
     assert date == "2026-06-17"
     assert time == "12:00"
+    assert has_city is True
+    assert language == "en"
+
+
+def test_validate_daily_reading_request_accepts_missing_city():
+    status, payload, sign, city, date, time, has_city, language = astrogeo_http.validate_daily_reading_request(
+        "aries", None, "2026-06-17", "12:00"
+    )
+
+    assert status is None
+    assert payload is None
+    assert sign == "aries"
+    assert city == ""
+    assert date == "2026-06-17"
+    assert time == "12:00"
+    assert has_city is False
+    assert language == "en"
+
+
+def test_validate_daily_reading_request_accepts_empty_city():
+    status, payload, sign, city, date, time, has_city, language = astrogeo_http.validate_daily_reading_request(
+        "aries", "   ", "2026-06-17", "12:00"
+    )
+
+    assert status is None
+    assert payload is None
+    assert sign == "aries"
+    assert city == ""
+    assert date == "2026-06-17"
+    assert time == "12:00"
+    assert has_city is False
+    assert language == "en"
+
+
+def test_validate_daily_reading_language_fallbacks_and_supported_values():
+    assert astrogeo_http.validate_daily_reading_language(None) == "en"
+    assert astrogeo_http.validate_daily_reading_language("") == "en"
+    assert astrogeo_http.validate_daily_reading_language("de") == "en"
+    assert astrogeo_http.validate_daily_reading_language("it") == "it"
+    assert astrogeo_http.validate_daily_reading_language(" es ") == "es"
 
 
 def test_validate_daily_reading_request_rejects_date_and_eu_date_together():
@@ -204,6 +246,18 @@ def _post(path, payload):
     return handler.status, handler.response_headers, response
 
 
+class FakeGetHandler(FakePostHandler):
+    def __init__(self, path):
+        super().__init__(path, b"")
+
+
+def _get(path):
+    handler = FakeGetHandler(path)
+    astrogeo_http.Handler.do_GET(handler)
+    response = json.loads(handler.wfile.getvalue().decode("utf-8"))
+    return handler.status, handler.response_headers, response
+
+
 def test_daily_reading_post_json_accepts_eu_date(monkeypatch):
     backend_payload = {
         "place": {"display_name": "Messina, Sicily, Italy"},
@@ -220,6 +274,7 @@ def test_daily_reading_post_json_accepts_eu_date(monkeypatch):
         return 200, backend_payload
 
     def fake_generate_daily_reading(payload, model, ollama_url):
+        captured["reading_payload"] = payload
         return {"kind": "daily_reading", "model": model, "text": "A playful line."}
 
     monkeypatch.setattr(astrogeo_http, "run_backend", fake_run_backend)
@@ -227,17 +282,19 @@ def test_daily_reading_post_json_accepts_eu_date(monkeypatch):
 
     status, headers, payload = _post(
         "/astrogeo/daily-reading",
-        {"sign": "aries", "city": "Messina", "eu_date": "23-06-2026", "time": "12:00"},
+        {"sign": "aries", "city": "Messina", "eu_date": "23-06-2026", "time": "12:00", "language": "it"},
     )
 
     assert status == 200
     assert headers["content-type"].startswith("application/json")
-    assert captured == {
+    assert {key: captured[key] for key in ("city", "date", "time", "kwargs")} == {
         "city": "Messina",
         "date": "2026-06-23",
         "time": "12:00",
         "kwargs": {},
     }
+    assert captured["reading_payload"]["has_city"] is True
+    assert captured["reading_payload"]["language"] == "it"
     assert payload["daily_reading"]["text"] == "A playful line."
 
 
@@ -331,6 +388,8 @@ def test_build_daily_reading_payload_uses_local_ollama_only(monkeypatch):
         "sign": "aries",
         "local_date": "2026-06-17",
         "city": "Messina, Sicily, Italy",
+        "has_city": True,
+        "language": "en",
         "sun_constellation": "Gemini",
         "zenith_constellation": "Aquila",
     }
@@ -367,3 +426,95 @@ def test_build_daily_reading_payload_maps_ollama_error_to_503(monkeypatch):
     assert payload["ok"] is False
     assert payload["error"]["code"] == "DAILY_READING_UNAVAILABLE"
     assert payload["error"]["message"] == "Ollama error: model not found"
+
+
+def test_daily_reading_get_without_city_skips_backend_and_uses_sun_only_context(monkeypatch):
+    captured = {}
+
+    def fail_run_backend(*args, **kwargs):
+        raise AssertionError("run_backend should not be called")
+
+    def fake_sun_constellation(utc_iso):
+        captured["utc_iso"] = utc_iso
+        return "Gemini"
+
+    def fake_generate_daily_reading(payload, model, ollama_url):
+        captured["reading_payload"] = payload
+        return {"kind": "daily_reading", "model": model, "text": "A generic line."}
+
+    monkeypatch.setattr(astrogeo_http, "run_backend", fail_run_backend)
+    monkeypatch.setattr(astrogeo_http, "sun_constellation", fake_sun_constellation)
+    monkeypatch.setattr(astrogeo_http, "generate_daily_reading", fake_generate_daily_reading)
+
+    status, headers, payload = _get(
+        "/daily-reading?sign=aries&date=2026-06-17&time=12:00&language=es"
+    )
+
+    assert status == 200
+    assert headers["content-type"].startswith("application/json")
+    assert captured["utc_iso"] == "2026-06-17T12:00:00"
+    assert captured["reading_payload"] == {
+        "sign": "aries",
+        "local_date": "2026-06-17",
+        "city": "",
+        "has_city": False,
+        "language": "es",
+        "sun_constellation": "Gemini",
+        "zenith_constellation": None,
+    }
+    assert payload["place"] is None
+    assert payload["astro"] == {
+        "sun_constellation": "Gemini",
+        "zenith_constellation": None,
+    }
+    assert payload["daily_reading"]["text"] == "A generic line."
+
+
+def test_daily_reading_post_with_empty_city_and_blank_language_defaults_to_english(monkeypatch):
+    captured = {}
+
+    def fail_run_backend(*args, **kwargs):
+        raise AssertionError("run_backend should not be called")
+
+    def fake_sun_constellation(utc_iso):
+        return "Gemini"
+
+    def fake_generate_daily_reading(payload, model, ollama_url):
+        captured["reading_payload"] = payload
+        return {"kind": "daily_reading", "model": model, "text": "A generic line."}
+
+    monkeypatch.setattr(astrogeo_http, "run_backend", fail_run_backend)
+    monkeypatch.setattr(astrogeo_http, "sun_constellation", fake_sun_constellation)
+    monkeypatch.setattr(astrogeo_http, "generate_daily_reading", fake_generate_daily_reading)
+
+    status, headers, payload = _post(
+        "/astrogeo/v1/daily-reading",
+        {"sign": "aries", "city": "   ", "date": "2026-06-17", "time": "12:00", "language": "   "},
+    )
+
+    assert status == 200
+    assert headers["content-type"].startswith("application/json")
+    assert captured["reading_payload"]["has_city"] is False
+    assert captured["reading_payload"]["language"] == "en"
+    assert payload["place"] is None
+
+
+def test_daily_reading_invalid_language_falls_back_to_english(monkeypatch):
+    captured = {}
+
+    def fake_sun_constellation(utc_iso):
+        return "Gemini"
+
+    def fake_generate_daily_reading(payload, model, ollama_url):
+        captured["reading_payload"] = payload
+        return {"kind": "daily_reading", "model": model, "text": "A generic line."}
+
+    monkeypatch.setattr(astrogeo_http, "sun_constellation", fake_sun_constellation)
+    monkeypatch.setattr(astrogeo_http, "generate_daily_reading", fake_generate_daily_reading)
+
+    status, _headers, _payload = _get(
+        "/daily-reading?sign=aries&date=2026-06-17&time=12:00&language=fr"
+    )
+
+    assert status == 200
+    assert captured["reading_payload"]["language"] == "en"
