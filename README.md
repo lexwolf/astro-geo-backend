@@ -232,6 +232,29 @@ points `/opt/astrogeo/current` at the active release, installs the package into
 `/opt/astrogeo/venv`, updates `astrogeo-http.service`, restarts it, and checks
 `http://127.0.0.1:8008/healthz`.
 
+The venv is disposable deployment state. The installer compares the Python
+major/minor version recorded in `venv/pyvenv.cfg` with the deployment interpreter
+(`python3`, or `DEPLOY_PYTHON` when invoking the remote installer directly).
+It clears and recreates the venv if the versions differ, the recorded version
+is missing, or `bin/python` is missing. Python patch updates reuse the venv.
+The selected Python must have venv support installed on the server.
+
+Each deployment upgrades pip, installs the release itself from its
+`pyproject.toml` with a regular `pip install <release-directory>`, runs
+`pip check`, and verifies imports as `astrogeo` in isolated Python mode.
+This installs the src-layout packages into site-packages without a permanent
+`PYTHONPATH` setting. The installer runs as root; releases and the venv remain
+root-owned, while the service continues to run as `astrogeo`.
+
+After deployment, verify on the server:
+
+```bash
+sudo -u astrogeo /opt/astrogeo/venv/bin/python -I -c \
+  'import reading, astropy, timezonefinder, requests; print(reading.__file__)'
+systemctl status astrogeo-http.service
+ss -lntp | grep ':8008'
+```
+
 The service explicitly runs the backend CLI from:
 
 ```text
@@ -253,6 +276,7 @@ Manual rollback on the server:
 
 ```bash
 sudo ln -sfn /opt/astrogeo/releases/<previous-release> /opt/astrogeo/current
+sudo /opt/astrogeo/venv/bin/python -m pip install /opt/astrogeo/current
 sudo install -o root -g root -m 0755 /opt/astrogeo/current/astrogeo_http.py /opt/astrogeo/astrogeo_http.py
 sudo systemctl restart astrogeo-http.service
 ```

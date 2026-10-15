@@ -5,6 +5,7 @@ APP_ROOT="${APP_ROOT:-/opt/astrogeo}"
 RELEASES_DIR="${RELEASES_DIR:-${APP_ROOT}/releases}"
 CURRENT_LINK="${CURRENT_LINK:-${APP_ROOT}/current}"
 VENV_DIR="${VENV_DIR:-${APP_ROOT}/venv}"
+DEPLOY_PYTHON="${DEPLOY_PYTHON:-python3}"
 SERVICE_NAME="${SERVICE_NAME:-astrogeo-http.service}"
 SERVICE_FILE="${SERVICE_FILE:-/etc/systemd/system/${SERVICE_NAME}}"
 SERVICE_TEMPLATE="${SERVICE_TEMPLATE:-deploy/astrogeo-http.service}"
@@ -65,6 +66,7 @@ rollback() {
   if [[ -n "${previous_current}" && -d "${previous_current}" ]]; then
     echo "Rolling current symlink back to ${previous_current}" >&2
     ln -sfn "${previous_current}" "${CURRENT_LINK}"
+    "${VENV_DIR}/bin/python" -m pip install "${previous_current}" || true
     install -o root -g root -m 0755 "${previous_current}/astrogeo_http.py" "${APP_ROOT}/astrogeo_http.py" || true
   elif [[ -n "${http_backup}" && -f "${http_backup}" ]]; then
     echo "Restoring previous astrogeo_http.py" >&2
@@ -105,14 +107,34 @@ if [[ ! -f "${release_dir}/pyproject.toml" ]]; then
   exit 1
 fi
 
-if [[ ! -x "${VENV_DIR}/bin/python" ]]; then
-  echo "Creating virtualenv at ${VENV_DIR}"
-  python3 -m venv "${VENV_DIR}"
+# Read the recorded version, not bin/python: after an OS upgrade that symlink
+# can resolve to a new interpreter while site-packages still uses the old one.
+python_version="$("${DEPLOY_PYTHON}" -c 'import sys; print("%d.%d" % sys.version_info[:2])')"
+venv_version="$("${DEPLOY_PYTHON}" - "${VENV_DIR}/pyvenv.cfg" <<'PY'
+import pathlib
+import sys
+
+config = pathlib.Path(sys.argv[1])
+if config.is_file():
+    for line in config.read_text().splitlines():
+        key, separator, value = line.partition("=")
+        if separator and key.strip() == "version":
+            print(".".join(value.strip().split(".")[:2]))
+            break
+PY
+)"
+if [[ ! -x "${VENV_DIR}/bin/python" || "${venv_version}" != "${python_version}" ]]; then
+  echo "Recreating virtualenv at ${VENV_DIR} (recorded: ${venv_version:-unknown}, deployment: ${python_version})"
+  "${DEPLOY_PYTHON}" -m venv --clear "${VENV_DIR}"
 fi
 
 "${VENV_DIR}/bin/python" -m pip install --upgrade pip
-"${VENV_DIR}/bin/python" -m pip install -e "${release_dir}"
+"${VENV_DIR}/bin/python" -m pip install "${release_dir}"
 "${VENV_DIR}/bin/python" -m pip check
+
+echo "Verifying installed packages as ${SERVICE_USER}"
+sudo -u "${SERVICE_USER}" env HOME="${RUNTIME_DIR}" "${VENV_DIR}/bin/python" -I -c \
+  'import reading, astropy, timezonefinder, requests; print(reading.__file__)'
 
 ln -sfn "${release_dir}" "${CURRENT_LINK}"
 install -o root -g root -m 0755 "${release_dir}/astrogeo_http.py" "${APP_ROOT}/astrogeo_http.py"
